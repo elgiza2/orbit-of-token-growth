@@ -63,6 +63,7 @@ export type Database = {
       }
       agent_artifacts: {
         Row: {
+          bot_id: string | null
           created_at: string
           id: string
           mime: string
@@ -73,6 +74,7 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          bot_id?: string | null
           created_at?: string
           id?: string
           mime: string
@@ -83,6 +85,7 @@ export type Database = {
           user_id: string
         }
         Update: {
+          bot_id?: string | null
           created_at?: string
           id?: string
           mime?: string
@@ -92,7 +95,15 @@ export type Database = {
           updated_at?: string
           user_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "agent_artifacts_bot_id_fkey"
+            columns: ["bot_id"]
+            isOneToOne: false
+            referencedRelation: "bots"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       agent_browser_contexts: {
         Row: {
@@ -194,6 +205,7 @@ export type Database = {
       }
       agent_documents: {
         Row: {
+          bot_id: string | null
           content: string
           created_at: string
           id: string
@@ -203,6 +215,7 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          bot_id?: string | null
           content: string
           created_at?: string
           id?: string
@@ -212,6 +225,7 @@ export type Database = {
           user_id: string
         }
         Update: {
+          bot_id?: string | null
           content?: string
           created_at?: string
           id?: string
@@ -220,7 +234,15 @@ export type Database = {
           updated_at?: string
           user_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "agent_documents_bot_id_fkey"
+            columns: ["bot_id"]
+            isOneToOne: false
+            referencedRelation: "bots"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       agent_jobs: {
         Row: {
@@ -1045,6 +1067,24 @@ export type Database = {
           updated_at?: string
           usd_amount?: number | null
           user_id?: string
+        }
+        Relationships: []
+      }
+      people_blocks: {
+        Row: {
+          blocked_id: string
+          blocker_id: string
+          created_at: string
+        }
+        Insert: {
+          blocked_id: string
+          blocker_id: string
+          created_at?: string
+        }
+        Update: {
+          blocked_id?: string
+          blocker_id?: string
+          created_at?: string
         }
         Relationships: []
       }
@@ -1989,6 +2029,45 @@ export type Database = {
         }
         Relationships: []
       }
+      vault_items: {
+        Row: {
+          ai_usage: string | null
+          created_at: string
+          detail: string
+          expiry: string | null
+          holder: string | null
+          id: string
+          kind: string
+          title: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          ai_usage?: string | null
+          created_at?: string
+          detail?: string
+          expiry?: string | null
+          holder?: string | null
+          id: string
+          kind: string
+          title: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          ai_usage?: string | null
+          created_at?: string
+          detail?: string
+          expiry?: string | null
+          holder?: string | null
+          id?: string
+          kind?: string
+          title?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       wallet_operations: {
         Row: {
           created_at: string
@@ -2046,6 +2125,7 @@ export type Database = {
         }
         Returns: boolean
       }
+      can_send_people: { Args: { _thread: string }; Returns: boolean }
       cancel_my_card_billing: { Args: never; Returns: boolean }
       charge_agent_usage: {
         Args: { p_operation_key: string; p_user_id: string }
@@ -2145,6 +2225,10 @@ export type Database = {
       create_people_group: {
         Args: { p_bot_ids: string[]; p_name: string; p_usernames: string[] }
         Returns: string
+      }
+      delete_people_thread_for_all: {
+        Args: { p_thread: string }
+        Returns: undefined
       }
       ensure_agent_trial: { Args: { p_user_id: string }; Returns: string }
       ensure_my_agent_trial: { Args: never; Returns: string }

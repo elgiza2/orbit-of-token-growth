@@ -73,7 +73,7 @@ export function createBotBrowser(userId: string, botId: string, computer: Comput
       }
       if (input.action === "show_user") {
         // Shows the user the live screen (e.g. WhatsApp/Telegram Web QR) so they scan it with their own phone.
-        const card = JSON.parse(await exportArtifact(computer, userId, { path: "/home/user/screen.png", name: "screen.png", mime: "image/png" }));
+        const card = JSON.parse(await exportArtifact(computer, userId, { path: "/home/user/screen.png", name: "screen.png", mime: "image/png" }, botId));
         return JSON.stringify({ ...card, instruction: "Screenshot is shown to the user. If it is a login QR, tell them to scan it from their phone app (WhatsApp: Linked devices; Telegram: Settings > Devices) within a minute, then reply 'done'. Then STOP and wait; afterwards use look to confirm sign-in." });
       }
       if (input.action === "login") {

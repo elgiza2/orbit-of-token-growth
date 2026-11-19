@@ -7,6 +7,7 @@ import { forceDarkTheme } from "@/lib/theme";
 import { AgentForm, type AgentFormValue } from "@/pages/agent/hub/HubPanels";
 import { Button } from "@/components/ui/button";
 import "@/styles/onboarding.css";
+import { toAvatar } from "@/lib/profile/avatar";
 
 const TYPES = [
   { id: "developer", t: "Developer", I: Code2 },
@@ -18,17 +19,6 @@ const TYPES = [
 ];
 const AGES = Array.from({ length: 108 }, (_, i) => i + 13);
 const ROW = 48;
-
-async function toAvatar(file: File): Promise<string> {
-  const img = await createImageBitmap(file);
-  const s = 256, c = document.createElement("canvas"); c.width = c.height = s;
-  const k = Math.max(s / img.width, s / img.height), w = img.width * k, h = img.height * k;
-  const context = c.getContext("2d");
-  if (!context) throw new Error("Couldn't prepare your photo.");
-  context.drawImage(img, (s - w) / 2, (s - h) / 2, w, h);
-  img.close();
-  return c.toDataURL("image/jpeg", 0.85);
-}
 
 function AgeWheel({ value, onChange }: { value: number; onChange: (n: number) => void }) {
   const ref = useRef<HTMLDivElement>(null);

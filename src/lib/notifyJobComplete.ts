@@ -1,4 +1,5 @@
-import { toast } from "sonner";
+import { claimNotification } from "@/lib/notifications/dedupe";
+import { showIsland } from "@/components/notifications/IslandNotice";
 
 /**
  * Fire a completion notification for a background job.
@@ -8,15 +9,19 @@ import { toast } from "sonner";
  *   (video, slides, deep research) surface even when the user tabbed away.
  */
 export function notifyJobComplete(opts: {
+  /** Stable event id; the same id is shown only once per device. */
+  id: string;
   kind: "video" | "slides" | "research";
   title: string;
   body?: string;
   onClickUrl?: string;
+  failed?: boolean;
 }) {
-  const { kind, title, body, onClickUrl } = opts;
+  const { id, title, body, onClickUrl } = opts;
+  if (!claimNotification(id)) return;
 
   try {
-    toast.success(title, { description: body });
+    showIsland({ id, title, body, tone: opts.failed ? "error" : "done", onOpen: onClickUrl ? () => { window.location.href = onClickUrl; } : undefined });
   } catch {
     /* ignore */
   }
@@ -29,7 +34,7 @@ export function notifyJobComplete(opts: {
     if (Notification.permission !== "granted") return;
     const n = new Notification(title, {
       body,
-      tag: `megsy-${kind}`,
+      tag: id,
       icon: "/icon-192.png",
       badge: "/icon-192.png",
     });

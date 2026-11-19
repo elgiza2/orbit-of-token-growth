@@ -59,8 +59,27 @@ export const peopleApi = {
   },
   send: async (threadId: string, content: string): Promise<PeopleMessage> => {
     const sender = await myUserId();
-    const msg = check(await db.from("people_messages").insert({ thread_id: threadId, sender_id: sender, content }).select("*").single()) as PeopleMessage;
-    return msg;
+    const r = await db.from("people_messages").insert({ thread_id: threadId, sender_id: sender, content }).select("*").single();
+    if (r.error) throw new Error(/row-level security|policy/i.test(r.error.message) ? "You can't message this person" : r.error.message);
+    return r.data as PeopleMessage;
+  },
+  /** Messages newer than the given time, used to catch anything a live update missed. */
+  since: async (threadId: string, after: string): Promise<PeopleMessage[]> =>
+    (check(await db.from("people_messages").select("*").eq("thread_id", threadId).gt("created_at", after).order("created_at", { ascending: true }).limit(100)) as PeopleMessage[]) || [],
+  deleteForAll: async (threadId: string) => { check(await db.rpc("delete_people_thread_for_all", { p_thread: threadId })); },
+  isBlocked: async (userId: string): Promise<boolean> => {
+    const me = await myUserId();
+    const row = check(await db.from("people_blocks").select("blocked_id").eq("blocker_id", me).eq("blocked_id", userId).maybeSingle());
+    return Boolean(row);
+  },
+  block: async (userId: string) => {
+    const me = await myUserId();
+    const r = await db.from("people_blocks").insert({ blocker_id: me, blocked_id: userId });
+    if (r.error && !/duplicate/i.test(r.error.message)) throw new Error(r.error.message);
+  },
+  unblock: async (userId: string) => {
+    const me = await myUserId();
+    check(await db.from("people_blocks").delete().eq("blocker_id", me).eq("blocked_id", userId));
   },
   markRead: async (threadId: string) => {
     const id = await myUserId();

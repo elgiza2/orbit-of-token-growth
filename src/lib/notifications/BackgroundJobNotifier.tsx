@@ -3,6 +3,7 @@ import { useEffect, useRef } from "react";
 
 import { supabase } from "@/integrations/supabase/client";
 import { notifyJobComplete } from "@/lib/notifyJobComplete";
+import { claimNotification, markNotified } from "@/lib/notifications/dedupe";
 import { hasPhoneAssistant, phoneLiveEnd, phoneReply } from "@/lib/native/assistantBridge";
 
 /**
@@ -44,12 +45,12 @@ export default function BackgroundJobNotifier() {
 
     const announceJob = async (row: any) => {
       if (!row?.id) return;
-      const key = `job:${row.id}:${row.status}`;
+      const key = `job:${row.id}`;
       if (seen.current.has(key)) return;
       if (row.status !== "completed" && row.status !== "failed") return;
       seen.current.add(key);
       if (hasPhoneAssistant() && row.conversation_id) {
-        if (row.status !== "completed") return;
+        if (row.status !== "completed" || !claimNotification(key)) return;
         const { data: conversation } = await supabase.from("conversations").select("bot_id").eq("id", row.conversation_id).maybeSingle();
         if (cancelled || !conversation?.bot_id) return;
         const { data: bot } = await supabase.from("bots").select("name").eq("id", conversation.bot_id).maybeSingle();
@@ -64,6 +65,8 @@ export default function BackgroundJobNotifier() {
           ? String(row.error || "Something went wrong. Your progress was saved.").slice(0, 180)
           : String(row.result || "").slice(0, 180) || undefined;
       notifyJobComplete({
+        id: key,
+        failed: row.status === "failed",
         kind: meta.kind,
         title,
         body,
@@ -75,11 +78,13 @@ export default function BackgroundJobNotifier() {
       if (!row?.id) return;
       const done = row.status === "done" || row.status === "completed" || row.status === "error" || row.status === "failed";
       if (!done) return;
-      const key = `run:${row.id}:${row.status}`;
+      const key = `run:${row.id}`;
       if (seen.current.has(key)) return;
       seen.current.add(key);
       const failed = row.status === "error" || row.status === "failed";
       notifyJobComplete({
+        id: key,
+        failed,
         kind: "research",
         title: failed ? "The agent stopped with an error" : "The agent finished your task",
         body: (row.result || undefined)?.slice?.(0, 180),
@@ -125,7 +130,16 @@ export default function BackgroundJobNotifier() {
         .in("status", ["completed", "failed"])
         .gte("updated_at", since)
         .limit(50);
-      (old as any[] | null)?.forEach((r) => seen.current.add(`job:${r.id}:${r.status}`));
+      const { data: oldRuns } = await supabase
+        .from("agent_routine_runs" as any)
+        .select("id")
+        .eq("user_id", userId)
+        .in("status", ["completed", "failed", "done", "error"])
+        .gte("updated_at", since)
+        .limit(50);
+      const oldIds = [...((old as any[] | null) || []).map((r) => `job:${r.id}`), ...((oldRuns as any[] | null) || []).map((r) => `run:${r.id}`)];
+      oldIds.forEach((id) => seen.current.add(id));
+      markNotified(oldIds);
       // Cleanup can happen while the seed query is in flight (StrictMode or navigation).
       if (cancelled) return;
       const instanceId = crypto.randomUUID();

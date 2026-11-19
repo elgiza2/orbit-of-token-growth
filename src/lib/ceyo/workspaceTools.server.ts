@@ -83,7 +83,7 @@ export function workspaceTools(ctx: Context): AgentTool[] {
     return JSON.stringify({ type: "ceyo.phone_call", id, to, from: placed.from, status: "dialing", already_requested: Boolean(placed.alreadyRequested), instruction: "Tell the user briefly that you are calling now and will post the result here when the call ends. Do not call again and do not invent the outcome." });
   });
   add("save_file", "Save a real text, code, CSV or JSON deliverable in the user's library.", { name: str, mime: str, content: str }, ["name", "mime", "content"], async (args) => {
-    const file = checked(await db.from("agent_documents").insert({ ...documentInput.parse(args), user_id: userId }).select("id,name").single());
+    const file = checked(await db.from("agent_documents").insert({ ...documentInput.parse(args), user_id: userId, bot_id: ctx.botId }).select("id,name").single());
     return JSON.stringify({ type: "ceyo.file", ...file });
   });
   add("read_file", "Read actual contents of a user-owned document reference supplied in chat.", { id: str }, ["id"], async (args) => {
@@ -98,6 +98,27 @@ export function workspaceTools(ctx: Context): AgentTool[] {
     const origin = independentAppOrigin(process.env.APP_URL || process.env.PUBLIC_APP_URL || "https://web.ceyo.si");
     const { routineHookSignature } = await import("@/lib/ceyo/routineHook");
     return JSON.stringify({ url: `${origin}/api/public/ceyo-hook/${row.id}/${await routineHookSignature(secret, row.id)}`, method: "POST" });
+  });
+  add("find_person", "Search other Ceyo users by username (with or without @) so the user can message them. Returns matching usernames and display names.", { query: str }, ["query"], async (args) => {
+    const { query } = z.object({ query: z.string().trim().min(2).max(40) }).parse(args);
+    const rows = checked(await db.rpc("search_people", { p_query: query.replace(/^@/, "") })) as Array<{ username: string; display_name: string | null }>;
+    return JSON.stringify({ people: (rows || []).map((r) => ({ username: r.username, name: r.display_name })), note: rows?.length ? undefined : "No Ceyo user has a username starting with that text. Ask the user for the exact @username." });
+  });
+  add("message_person", "Send a direct chat message from the user to another Ceyo user by their @username. Use only when the latest user message asks you to message that person; send exactly what the user wants said. The message appears in the user's People chats.", { username: str, text: str }, ["username", "text"], async (args) => {
+    const input = z.object({ username: z.string().trim().min(3).max(21), text: z.string().trim().min(1).max(4000) }).parse(args);
+    const username = input.username.replace(/^@/, "").toLowerCase();
+    const opened = await db.rpc("open_direct_thread", { p_username: username });
+    if (opened.error) throw new Error(/No user/i.test(opened.error.message) ? `No Ceyo user is called @${username}. Use find_person or ask the user for the exact username.` : opened.error.message);
+    const sent = await db.from("people_messages").insert({ thread_id: opened.data as string, sender_id: userId, content: input.text }).select("id,created_at").single();
+    if (sent.error) throw new Error(/row-level security|policy/i.test(sent.error.message) ? `Messages to @${username} are blocked.` : sent.error.message);
+    return JSON.stringify({ sent: true, to: `@${username}`, thread_id: opened.data, message_id: sent.data.id });
+  });
+  add("read_vault", "Read the user's Vault: saved card labels (holder, last 4 digits, expiry and what the user allows you to use each card for), website logins (site and username only) and contact info. Passwords, full card numbers and security codes are never stored here; ask the user to type them in the secure payment or login page themselves. Respect each card's allowed use.", { kind: { type: "string", enum: ["all", "card", "login", "contact"] } }, [], async (args) => {
+    const { kind } = z.object({ kind: z.enum(["all", "card", "login", "contact"]).default("all") }).parse(args ?? {});
+    let request = db.from("vault_items").select("id,kind,title,detail,holder,expiry,ai_usage").eq("user_id", userId).order("created_at", { ascending: false }).limit(100);
+    if (kind !== "all") request = request.eq("kind", kind);
+    const rows = checked(await request) as Array<{ kind: string; title: string; detail: string; holder: string | null; expiry: string | null; ai_usage: string | null }>;
+    return JSON.stringify({ items: rows.map((r) => r.kind === "card" ? { kind: "card", name: r.title, holder: r.holder, last4: r.detail, expiry: r.expiry, allowed_use: r.ai_usage || "Not specified — ask before using" } : { kind: r.kind, title: r.title, detail: r.detail }), empty: !rows.length });
   });
   add("list_routines", "List the user's saved routines, intervals and execution errors.", {}, [], async () => JSON.stringify(checked(await db.from("agent_routines").select("id,title,goal,interval_minutes,interval_hours,active,next_run_at,last_error").eq("user_id", userId))));
   add("create_routine", "Save a recurring task, including every 5 minutes (interval_minutes:5), daily (interval_hours:24) or weekly (168). User goal is the authorization boundary: never add external actions. Execution needs a configured external scheduler; do not claim it runs until configured. Explain recurring usage costs.", { title: str, goal: str, interval_hours: { type: "integer", enum: [24, 168] }, interval_minutes: { type: "integer", minimum: 5, maximum: 10080 } }, ["title", "goal"], async (args) => {

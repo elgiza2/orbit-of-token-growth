@@ -59,8 +59,10 @@ const EVM_RPC = {
   avalanche: "https://avalanche-c-chain-rpc.publicnode.com",
 } as const;
 
+/** Each provider gets a short deadline so one slow network cannot hold the whole wallet. */
+const tFetch = (url: string, init: RequestInit = {}) => fetch(url, { ...init, signal: AbortSignal.timeout(4500) });
 async function rpc(url: string, method: string, params: unknown[]) {
-  const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) });
+  const r = await tFetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) });
   if (!r.ok) throw new Error("Balance unavailable");
   const j = await r.json() as { result?: any; error?: unknown };
   if (j.error || j.result === undefined) throw new Error("Balance unavailable");
@@ -73,9 +75,9 @@ const erc20 = async (chain: keyof typeof EVM_RPC, token: string, owner: string, 
 /** Balances keyed by token id from walletTokens.ts; failed reads reject rather than inventing a zero balance. */
 export async function walletBalances(a: WalletAddresses): Promise<Record<string, number>> {
   const safe = (p: Promise<number>) => p.then((n) => { if (!Number.isFinite(n)) throw new Error("Balance unavailable"); return n; });
-  const tron = () => fetch(`https://api.trongrid.io/v1/accounts/${a.tron}`).then((r) => { if (!r.ok) throw new Error("Balance unavailable"); return r.json(); }).then((j: any) => { if (!Array.isArray(j.data)) throw new Error("Balance unavailable"); return j.data[0] ?? {}; });
+  const tron = () => tFetch(`https://api.trongrid.io/v1/accounts/${a.tron}`).then((r) => { if (!r.ok) throw new Error("Balance unavailable"); return r.json(); }).then((j: any) => { if (!Array.isArray(j.data)) throw new Error("Balance unavailable"); return j.data[0] ?? {}; });
   const tasks = [
-    () => safe(fetch(`https://mempool.space/api/address/${a.bitcoin}`).then((r) => r.json()).then((j: any) => (j.chain_stats.funded_txo_sum - j.chain_stats.spent_txo_sum) / 1e8)),
+    () => safe(tFetch(`https://mempool.space/api/address/${a.bitcoin}`).then((r) => r.json()).then((j: any) => (j.chain_stats.funded_txo_sum - j.chain_stats.spent_txo_sum) / 1e8)),
     () => safe(rpc(EVM_RPC.ethereum, "eth_getBalance", [a.evm, "latest"]).then((h) => hexToNum(h, 18))),
     () => safe(rpc("https://solana-rpc.publicnode.com", "getBalance", [a.solana]).then((r) => Number(r?.value) / 1e9)),
     () => safe(rpc(EVM_RPC.bsc, "eth_getBalance", [a.evm, "latest"]).then((h) => hexToNum(h, 18))),
@@ -83,14 +85,20 @@ export async function walletBalances(a: WalletAddresses): Promise<Record<string,
     () => safe(erc20("ethereum", "0xdAC17F958D2ee523a2206206994597C13D831ec7", a.evm, 6)),
     () => safe(erc20("base", "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", a.evm, 6)),
     () => safe(erc20("arbitrum", "0x912CE59144191C1204E64559FE8253a0e49E6548", a.evm, 18)),
-    () => safe(fetch(`https://toncenter.com/api/v2/getAddressBalance?address=${a.ton}`).then((r) => r.json()).then((j: any) => j.ok === false || j.result === undefined ? NaN : Number(j.result) / 1e9)),
+    () => safe(tFetch(`https://toncenter.com/api/v2/getAddressBalance?address=${a.ton}`).then((r) => r.json()).then((j: any) => j.ok === false || j.result === undefined ? NaN : Number(j.result) / 1e9)),
     () => safe(rpc(EVM_RPC.avalanche, "eth_getBalance", [a.evm, "latest"]).then((h) => hexToNum(h, 18))),
     tron,
   ];
-  const values = [];
-  for (let i = 0; i < tasks.length; i += 5) values.push(...await Promise.all(tasks.slice(i, i + 5).map((task) => task().catch(() => new Promise((r) => setTimeout(r, 600)).then(task)).catch(() => new Promise((r) => setTimeout(r, 1200)).then(task)))));
-  const [btc, eth, sol, bnb, pol, usdt, usdc, arb, ton, avax, tronAcc] = values;
-  const trx = Number(tronAcc.balance || 0) / 1e6;
-  const usdtTron = Number((tronAcc.trc20 || []).find((t: any) => t.TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t)?.TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t || 0) / 1e6;
-  return { bitcoin: btc, ethereum: eth, solana: sol, binancecoin: bnb, "polygon-ecosystem-token": pol, tether: usdt, "usd-coin": usdc, arbitrum: arb, "the-open-network": ton, "avalanche-2": avax, tron: trx, "tether-tron": usdtTron };
+  // All networks at once, one quick retry each; a network that still fails is left out instead of failing the wallet.
+  const settled = await Promise.allSettled(tasks.map((task) => (task as () => Promise<any>)().catch(() => new Promise((r) => setTimeout(r, 400)).then(task))));
+  const [btc, eth, sol, bnb, pol, usdt, usdc, arb, ton, avax, tronAcc] = settled.map((r) => r.status === "fulfilled" ? r.value : undefined);
+  const out: Record<string, number> = {};
+  const put = (id: string, v: unknown) => { if (typeof v === "number" && Number.isFinite(v)) out[id] = v; };
+  put("bitcoin", btc); put("ethereum", eth); put("solana", sol); put("binancecoin", bnb); put("polygon-ecosystem-token", pol); put("tether", usdt); put("usd-coin", usdc); put("arbitrum", arb); put("the-open-network", ton); put("avalanche-2", avax);
+  if (tronAcc && typeof tronAcc === "object") {
+    put("tron", Number((tronAcc as any).balance || 0) / 1e6);
+    put("tether-tron", Number(((tronAcc as any).trc20 || []).find((t: any) => t.TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t)?.TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t || 0) / 1e6);
+  }
+  if (!Object.keys(out).length) { const first = settled.find((r) => r.status === "rejected") as PromiseRejectedResult | undefined; throw first?.reason instanceof Error ? first.reason : new Error("Balance unavailable"); }
+  return out;
 }

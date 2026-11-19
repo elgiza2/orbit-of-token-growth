@@ -1,7 +1,10 @@
 import { userErrorText } from "@/lib/errors";
 /** Person-to-person messaging inside the hub: username setup, chat list, new chat/group forms and the chat view. */
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowUp, ChevronLeft, LogOut, UserPlus, Bot, X, AtSign, Check, MoreHorizontal } from "lucide-react";
+import { ArrowUp, ChevronLeft, LogOut, UserPlus, Bot, X, AtSign, Check, MoreHorizontal, Trash2, Ban, Reply, Link2 } from "lucide-react";
+import { useSwipeReply } from "@/hooks/useSwipeReply";
+import { quoteFor, splitReply, withReply } from "@/lib/chat/replyQuote";
+import { askConfirm } from "@/components/common/CeyoConfirm";
 import { FormattedAnswer } from "@/components/chat/FormattedAnswer";
 import { supabase } from "@/integrations/supabase/client";
 import type { AgentInfo } from "@/lib/agentsky/client";
@@ -166,7 +169,13 @@ export function PeopleChat({ lang, threadId, agents, onBack }: { lang: HubLang; 
   const [panel, setPanel] = useState<"" | "people" | "bots">("");
   const [menuOpen, setMenuOpen] = useState(false);
   const [botsBusy, setBotsBusy] = useState(0);
+  const [replyTo, setReplyTo] = useState<PeopleMessage | null>(null);
+  const [profile, setProfile] = useState<PersonInfo | null>(null);
+  const [blocked, setBlocked] = useState(false);
+  const swipe = useSwipeReply<PeopleMessage>((m) => { setReplyTo(m); textarea.current?.focus(); });
   const scroller = useRef<HTMLDivElement>(null);
+  const latestRef = useRef("");
+  useEffect(() => { const last = messages[messages.length - 1]?.created_at; if (last) latestRef.current = last; }, [messages]);
   const textarea = useRef<HTMLTextAreaElement>(null);
 
   const reloadInfo = () => peopleApi.info(threadId).then((i) => i && setInfo({ members: i.members || [], bots: i.bots || [] })).catch(() => {});
@@ -175,15 +184,30 @@ export function PeopleChat({ lang, threadId, agents, onBack }: { lang: HubLang; 
     void myUserId().then((id) => alive && setMe(id)).catch(() => {});
     void peopleApi.thread(threadId).then((t) => alive && setThread(t)).catch(() => {});
     void reloadInfo();
-    void peopleApi.messages(threadId).then((m) => { if (alive) setMessages(m); }).catch((e) => setError(userErrorText(e)));
+    latestRef.current = "";
+    void peopleApi.messages(threadId).then((m) => { if (alive) { setMessages(m); latestRef.current = m[m.length - 1]?.created_at || new Date(0).toISOString(); } }).catch((e) => setError(userErrorText(e)));
     void peopleApi.markRead(threadId);
+    const merge = (incoming: PeopleMessage[]) => {
+      if (!alive || !incoming.length) return;
+      setMessages((cur) => {
+        const ids = new Set(cur.map((x) => x.id));
+        const fresh = incoming.filter((m) => !ids.has(m.id));
+        return fresh.length ? [...cur, ...fresh].sort((a, b) => a.created_at.localeCompare(b.created_at)) : cur;
+      });
+      void peopleApi.markRead(threadId);
+    };
+    const catchUp = () => { if (!document.hidden && latestRef.current) void peopleApi.since(threadId, latestRef.current).then(merge).catch(() => {}); };
+    let live = false;
     const channel = supabase.channel(`people-thread-${threadId}-${Math.random().toString(36).slice(2)}`)
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "people_messages", filter: `thread_id=eq.${threadId}` }, (p: any) => {
-        const m = p.new as PeopleMessage;
-        setMessages((cur) => cur.some((x) => x.id === m.id) ? cur : [...cur, m]);
-        void peopleApi.markRead(threadId);
-      }).subscribe();
-    return () => { alive = false; void supabase.removeChannel(channel); };
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "people_messages", filter: `thread_id=eq.${threadId}` }, (p: any) => merge([p.new as PeopleMessage]))
+      .subscribe((status) => { live = status === "SUBSCRIBED"; if (live) catchUp(); });
+    // Live updates are the fast path; a light catch-up covers dropped sockets and sleeping tabs.
+    const timer = window.setInterval(() => { if (!live) catchUp(); }, 2500);
+    const slow = window.setInterval(catchUp, 15000);
+    const onVisible = () => catchUp();
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onVisible);
+    return () => { alive = false; window.clearInterval(timer); window.clearInterval(slow); document.removeEventListener("visibilitychange", onVisible); window.removeEventListener("focus", onVisible); void supabase.removeChannel(channel); };
   }, [threadId]);
   useEffect(() => { scroller.current?.scrollTo({ top: scroller.current.scrollHeight }); }, [messages.length, botsBusy]);
   useEffect(() => {
@@ -197,6 +221,18 @@ export function PeopleChat({ lang, threadId, agents, onBack }: { lang: HubLang; 
   const other = thread?.kind === "direct" ? info.members.find((m) => m.id !== me) : null;
   const title = isGroup ? thread?.name || (ar ? "جروب" : "Group") : personLabel(other);
   const people = useMemo(() => new Map(info.members.map((m) => [m.id, m])), [info.members]);
+  useEffect(() => { if (other?.id) void peopleApi.isBlocked(other.id).then(setBlocked).catch(() => {}); }, [other?.id]);
+  const deleteForAll = async () => {
+    setMenuOpen(false);
+    if (!(await askConfirm({ title: "Delete this chat for everyone?", body: isGroup ? "All messages are removed for every member. This can't be undone." : "All messages are removed for you and the other person. This can't be undone.", confirm: "Delete", danger: true }))) return;
+    try { await peopleApi.deleteForAll(threadId); window.dispatchEvent(new Event("ceyo-people-changed")); onBack(); } catch (e) { setError(userErrorText(e)); }
+  };
+  const toggleBlock = async () => {
+    setMenuOpen(false);
+    if (!other) return;
+    if (!blocked && !(await askConfirm({ title: `Block ${personLabel(other)}?`, body: "Neither of you can send messages in this chat until you unblock.", confirm: "Block", danger: true }))) return;
+    try { if (blocked) await peopleApi.unblock(other.id); else await peopleApi.block(other.id); setBlocked(!blocked); } catch (e) { setError(userErrorText(e)); }
+  };
   // Prefer the owner's real bot record so the avatar matches the one in the normal chat.
   const botAgents = useMemo(() => info.bots.map((b) => agents.find((a) => a.id === b.id) || botAgent(b)), [info.bots, agents]);
   const bots = useMemo(() => new Map(info.bots.map((b, i) => [b.id, { bot: b, agent: botAgents[i] }])), [info.bots, botAgents]);
@@ -208,9 +244,10 @@ export function PeopleChat({ lang, threadId, agents, onBack }: { lang: HubLang; 
   const send = async (followUp?: string) => {
     const content = (followUp ?? text).trim();
     if (!content) return;
-    setText(""); setError("");
+    const quoted = followUp ? null : replyTo;
+    setText(""); setError(""); setReplyTo(null);
     try {
-      const m = await peopleApi.send(threadId, content);
+      const m = await peopleApi.send(threadId, withReply(quoted ? splitReply(quoted.content).body : null, content));
       setMessages((cur) => cur.some((x) => x.id === m.id) ? cur : [...cur, m]);
       if (info.bots.length) {
         setBotsBusy((n) => n + 1);
@@ -220,7 +257,7 @@ export function PeopleChat({ lang, threadId, agents, onBack }: { lang: HubLang; 
           void peopleApi.messages(threadId).then((list) => setMessages((cur) => { const ids = new Set(list.map((x) => x.id)); return [...list, ...cur.filter((x) => !ids.has(x.id))]; })).catch(() => {});
         });
       }
-    } catch (e) { setText(content); setError(e instanceof Error ? e.message : "Not sent"); }
+    } catch (e) { setText(content); setReplyTo(quoted); setError(e instanceof Error ? e.message : "Not sent"); }
   };
 
   const shownBots = botAgents.slice(0, 6);
@@ -234,10 +271,10 @@ export function PeopleChat({ lang, threadId, agents, onBack }: { lang: HubLang; 
   return <section className="cx-chat" aria-label={`${title} conversation`}>
     <header className="cx-head">
       <button type="button" className="cx-circle cx-glass" aria-label={ar ? "رجوع" : "Back"} onClick={onBack}><ChevronLeft size={22} /></button>
-      <div className="cx-title-pill cx-glass">
+      <button type="button" className="cx-title-pill cx-glass" disabled={!other} onClick={() => other && setProfile(other)} aria-label={other ? `Open ${title}'s profile` : undefined}>
         {headAvatars}
         <strong dir="auto">{title}</strong>
-      </div>
+      </button>
       <div className="cx-head-actions">
         <button type="button" className="cx-circle cx-glass cx-head-menu" aria-label="Menu" aria-haspopup="menu" aria-expanded={menuOpen} onClick={() => setMenuOpen((o) => !o)}><MoreHorizontal size={20} /></button>
       </div>
@@ -245,7 +282,9 @@ export function PeopleChat({ lang, threadId, agents, onBack }: { lang: HubLang; 
       {menuOpen && <div className="cx-pop cx-pop-down" role="menu">
         {isGroup && <button type="button" onClick={() => { setMenuOpen(false); setPanel("people"); }}><UserPlus size={19} />{ar ? "ضيف شخص" : "Add person"}</button>}
         {isGroup && <button type="button" onClick={() => { setMenuOpen(false); setPanel("bots"); }}><Bot size={19} />{ar ? "ضيف بوت" : "Add bot"}</button>}
-        <button type="button" data-danger="true" onClick={() => { setMenuOpen(false); void peopleApi.leave(threadId).then(() => { window.dispatchEvent(new Event("ceyo-people-changed")); onBack(); }); }}><LogOut size={19} />{ar ? "خروج" : "Leave"}</button>
+        {isGroup && <button type="button" onClick={() => { setMenuOpen(false); void peopleApi.leave(threadId).then(() => { window.dispatchEvent(new Event("ceyo-people-changed")); onBack(); }); }}><LogOut size={19} />{ar ? "خروج" : "Leave"}</button>}
+        {!isGroup && other && <button type="button" onClick={() => void toggleBlock()}><Ban size={19} />{blocked ? "Unblock" : "Block"}</button>}
+        <button type="button" data-danger="true" onClick={() => void deleteForAll()}><Trash2 size={19} />{isGroup ? "Delete for everyone" : "Delete for both"}</button>
       </div>}
     </header>
 
@@ -266,17 +305,17 @@ export function PeopleChat({ lang, threadId, agents, onBack }: { lang: HubLang; 
             return <div key={m.id} className="cx-row-wrap">
               {showDay && <p className="cx-day">{new Date(m.created_at).toDateString() === new Date().toDateString() ? (ar ? "النهارده " : "Today ") : ""}{time}</p>}
               {mine ? (
-                <div className="cx-row cx-row-user">
-                  <div data-no-translate className="cx-bubble cx-bubble-user" dir="auto">{m.content}</div>
+                <div className="cx-row cx-row-user" {...swipe(m)}>
+                  <div data-no-translate className="cx-bubble cx-bubble-user" dir="auto"><ReplyBody content={m.content} /></div>
                   <span className="cx-time">{time}</span>
                 </div>
               ) : (
-                <div className="cx-row cx-row-agent">
-                  <div className="cx-avatar">{hit ? <BotAvatar agent={hit.agent} size={22} /> : <PersonAvatar person={person} size={22} />}</div>
+                <div className="cx-row cx-row-agent" {...swipe(m)}>
+                  <div className="cx-avatar">{hit ? <BotAvatar agent={hit.agent} size={22} /> : <button type="button" className="pp-avatar-btn" aria-label={`Open ${personLabel(person)}'s profile`} onClick={() => person && setProfile(person)}><PersonAvatar person={person} size={22} /></button>}</div>
                   <div className="cx-agent-body">
                     {isGroup && <span className="cx-author" dir="auto">{hit ? hit.bot.name : personLabel(person)}</span>}
                     <div data-no-translate className="cx-bubble cx-bubble-agent" dir="auto">
-                      {hit ? <FormattedAnswer text={m.content} onSend={(message) => { void send(message); }} /> : <p style={{ whiteSpace: "pre-wrap" }}>{m.content}</p>}
+                      {hit ? <FormattedAnswer text={m.content} onSend={(message) => { void send(message); }} /> : <ReplyBody content={m.content} />}
                     </div>
                   </div>
                   <span className="cx-time">{time}</span>
@@ -293,6 +332,8 @@ export function PeopleChat({ lang, threadId, agents, onBack }: { lang: HubLang; 
     </div>
 
     <div className="cx-composer-wrap">
+      {replyTo && <div className="cx-reply-preview"><Reply size={15} /><span dir="auto">{quoteFor(splitReply(replyTo.content).body)}</span><button type="button" aria-label="Cancel reply" onClick={() => setReplyTo(null)}><X size={15} /></button></div>}
+      {blocked && <p className="pp-muted pp-blocked" role="status">You blocked this person. Unblock from the menu to send messages.</p>}
       {mentionMatches.length > 0 && <div className="cx-mentions" role="listbox">{mentionMatches.map((b) => <button type="button" role="option" key={b.id} onPointerDown={(e) => { e.preventDefault(); pickMention(b.name); }}><BotAvatar agent={bots.get(b.id)?.agent || botAgent(b)} size={26} /><span>{b.name}</span></button>)}</div>}
       <div className="cx-composer">
         <textarea
@@ -308,10 +349,11 @@ export function PeopleChat({ lang, threadId, agents, onBack }: { lang: HubLang; 
             if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void send(); }
           }}
         />
-        <button type="button" className="cx-circle cx-send" aria-label="Send" disabled={!text.trim()} onClick={() => void send()}><ArrowUp size={18} /></button>
+        <button type="button" className="cx-circle cx-send" aria-label="Send" disabled={!text.trim() || blocked} onClick={() => void send()}><ArrowUp size={18} /></button>
       </div>
     </div>
 
+    {profile && <PersonProfileSheet person={profile} messages={messages} onClose={() => setProfile(null)} />}
     {panel && <>
       <div className="cx-sheet-scrim" onPointerDown={() => setPanel("")} />
       <div className="cx-sheet pp-sheet" role="dialog" aria-label={panel === "people" ? (ar ? "ضيف شخص" : "Add person") : (ar ? "ضيف بوت" : "Add bot")}>
@@ -325,4 +367,40 @@ export function PeopleChat({ lang, threadId, agents, onBack }: { lang: HubLang; 
       </div>
     </>}
   </section>;
+}
+
+/** A message body with an optional quoted reply on top. */
+function ReplyBody({ content }: { content: string }) {
+  const { quote, body } = splitReply(content);
+  return <>{quote && <span className="cx-reply-quote" dir="auto">{quote}</span>}<p style={{ whiteSpace: "pre-wrap", margin: 0 }}>{body}</p></>;
+}
+
+const URL_RE = /https?:\/\/[^\s<>()]+/g;
+const IMAGE_RE = /\.(png|jpe?g|gif|webp|avif)(\?|$)/i;
+
+/** Another person's profile: photo, username, and what was shared in this chat. */
+function PersonProfileSheet({ person, messages, onClose }: { person: PersonInfo; messages: PeopleMessage[]; onClose: () => void }) {
+  const shared = useMemo(() => {
+    const seen = new Set<string>();
+    const out: { url: string; image: boolean; at: string }[] = [];
+    for (const m of [...messages].reverse()) for (const url of m.content.match(URL_RE) || []) {
+      const clean = url.replace(/[.,!?]+$/, "");
+      if (seen.has(clean)) continue;
+      seen.add(clean); out.push({ url: clean, image: IMAGE_RE.test(clean), at: m.created_at });
+    }
+    return out;
+  }, [messages]);
+  const images = shared.filter((s) => s.image);
+  const links = shared.filter((s) => !s.image);
+  return <>
+    <div className="cx-sheet-scrim" onPointerDown={onClose} />
+    <div className="cx-sheet pp-sheet pp-profile" role="dialog" aria-label={`${personLabel(person)} profile`}>
+      <span className="cx-grip" />
+      <div className="pp-profile-head"><PersonAvatar person={person} size={84} /><strong dir="auto">{person.username ? `@${person.username}` : personLabel(person)}</strong></div>
+      <h3 className="pp-sub">Shared in this chat</h3>
+      {!shared.length && <p className="pp-muted">Nothing shared yet. Photos and links sent here will show up.</p>}
+      {images.length > 0 && <div className="pp-shared-grid">{images.map((s) => <a key={s.url} href={s.url} target="_blank" rel="noopener noreferrer"><img src={s.url} alt="" loading="lazy" /></a>)}</div>}
+      {links.length > 0 && <div className="pp-results">{links.map((s) => <a key={s.url} className="pp-result" href={s.url} target="_blank" rel="noopener noreferrer"><Link2 size={16} /><span><strong dir="ltr">{s.url.replace(/^https?:\/\//, "").slice(0, 60)}</strong><small>{new Date(s.at).toLocaleDateString()}</small></span></a>)}</div>}
+    </div>
+  </>;
 }

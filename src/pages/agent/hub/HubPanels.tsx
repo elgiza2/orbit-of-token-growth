@@ -231,7 +231,7 @@ export function ProfilePanel({
   if (view === "routines" || view === "library") return (
     <section className="cx-sub" key={view}>
       <Head title={view === "routines" ? (ar ? "الروتينات" : "Routines") : (ar ? "المكتبة" : "Library")} back={() => setView("main")} />
-      <ResourceList kind={view === "routines" ? "routines" : "files"} botId={agent.id} />
+      <ResourceList kind={view === "routines" ? "routines" : "files"} botId={agent.id} primary={agent.isDefault} />
     </section>
   );
 

@@ -4,7 +4,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { askConfirm } from "@/components/common/CeyoConfirm";
 import {
-  ArrowUpRight, Check, ChevronLeft, ChevronRight, ChevronsUpDown, Contrast, Copy, CreditCard,
+  ArrowUpRight, Camera, Check, ChevronLeft, ChevronRight, ChevronsUpDown, Contrast, Copy, CreditCard,
   KeyRound, Moon, Phone as PhoneIcon, PhoneIncoming, PhoneOutgoing, Plus, Search, Smartphone, Star, Sun, Trash2, User, Vault, X,
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/legacyClient";
@@ -33,6 +33,9 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { isPlayApp } from "@/lib/native/playBilling";
 import { formatLocalPrice } from "@/lib/payments/localPrices";
 import { readSetting, saveSetting } from "./settingsStorage";
+import { updateMyProfile, usernameAvailable, useMyProfile } from "@/lib/profile/myProfile";
+import { toAvatar } from "@/lib/profile/avatar";
+import { USERNAME_RE, normalizeUsername } from "@/lib/people/peopleApi";
 import { APP_LANGUAGES } from "@/lib/i18n/bundledLocales";
 import { hasPhoneAssistant, phoneOpenSettings, phoneOption, phoneRoutine, phoneScreenMode, phoneStatus, type PhoneAssistantStatus, type ScreenMode } from "@/lib/native/assistantBridge";
 
@@ -156,18 +159,8 @@ async function signOut(nav: Nav) {
 }
 
 function useMe() {
-  const [me, setMe] = useState({ email: "", name: "", avatar: "" });
-  useEffect(() => {
-    void supabase.auth.getUser().then(({ data }) => {
-      const metadata = (data.user?.user_metadata || {}) as Record<string, string>;
-      setMe({
-        email: data.user?.email || "",
-        name: metadata.full_name || metadata.name || "",
-        avatar: metadata.avatar_url || metadata.picture || "",
-      });
-    });
-  }, []);
-  return me;
+  const p = useMyProfile();
+  return { email: p?.email || "", name: p?.displayName || "", avatar: p?.avatarUrl || "", username: p?.username || "" };
 }
 
 function MeCard({ onClick }: { onClick?: () => void }) {
@@ -175,7 +168,7 @@ function MeCard({ onClick }: { onClick?: () => void }) {
   return (
     <button type="button" className="ceyo-row ceyo-me" onClick={onClick} tabIndex={onClick ? 0 : -1}>
       <span className="ceyo-avatar">{me.avatar ? <img src={me.avatar} alt="" /> : (me.name || me.email || "C").charAt(0).toUpperCase()}</span>
-      <span className="ceyo-row-label"><strong>{me.name || "Ceyo account"}</strong><small>{me.email}</small></span>
+      <span className="ceyo-row-label"><strong>{me.name || "Ceyo account"}</strong><small>{me.username ? `@${me.username}` : me.email}</small></span>
       {onClick && <ChevronRight size={17} className="ceyo-row-chev" />}
     </button>
   );
@@ -260,9 +253,58 @@ function Account({ nav }: { nav: Nav }) {
       toast.error(error instanceof Error ? error.message : "Could not switch account");
     }
   };
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [photoBusy, setPhotoBusy] = useState(false);
+  const [editing, setEditing] = useState<"" | "name" | "username">("");
+  const [draft, setDraft] = useState("");
+  const [check, setCheck] = useState<"" | "checking" | "free" | "taken" | "invalid">("");
+  const [saving, setSaving] = useState(false);
+  useEffect(() => {
+    if (editing !== "username") return;
+    const u = normalizeUsername(draft);
+    if (u === me.username) { setCheck(""); return; }
+    if (!USERNAME_RE.test(u)) { setCheck(draft ? "invalid" : ""); return; }
+    setCheck("checking");
+    const t = window.setTimeout(() => { void usernameAvailable(u).then((ok) => setCheck(ok ? "free" : "taken")).catch(() => setCheck("")); }, 400);
+    return () => window.clearTimeout(t);
+  }, [draft, editing, me.username]);
+  const pickPhoto = async (file?: File) => {
+    if (!file) return;
+    setPhotoBusy(true);
+    try { await updateMyProfile({ avatarUrl: await toAvatar(file) }); toast.success("Photo updated"); }
+    catch (e) { toast.error(e instanceof Error ? e.message : "Couldn't update your photo"); }
+    finally { setPhotoBusy(false); if (fileRef.current) fileRef.current.value = ""; }
+  };
+  const saveDraft = async () => {
+    setSaving(true);
+    try { await updateMyProfile(editing === "username" ? { username: draft } : { displayName: draft }); setEditing(""); toast.success(editing === "username" ? "Username saved" : "Name saved"); }
+    catch (e) { toast.error(e instanceof Error ? e.message : "Couldn't save"); }
+    finally { setSaving(false); }
+  };
+  const checkText = { "": "", checking: "Checking…", free: "Available", taken: "Someone already uses this username", invalid: "3–20 lowercase letters, numbers or _" }[check];
+  if (editing) return (
+    <Shell title={editing === "username" ? "Username" : "Name"} back={() => setEditing("")}>
+      <div className="ceyo-account-edit">
+        <label className="ceyo-account-field">{editing === "username" && <span aria-hidden>@</span>}<input autoFocus value={draft} maxLength={editing === "username" ? 21 : 40} autoCapitalize="none" autoCorrect="off" spellCheck={false} aria-label={editing === "username" ? "Username" : "Name"} onChange={(e) => setDraft(editing === "username" ? e.target.value.toLowerCase().replace(/\s/g, "") : e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") void saveDraft(); }} /></label>
+        {editing === "username" && <p className="ceyo-note" role="status" data-tone={check}>{checkText || "People find and message you with this username."}</p>}
+        <Button variant="neutral" className="ceyo-account-save" disabled={saving || (editing === "username" ? check !== "free" : draft.trim().length < 2 || draft.trim() === me.name)} onClick={() => void saveDraft()}>{saving ? "Saving…" : "Save"}</Button>
+      </div>
+    </Shell>
+  );
   return (
     <Shell title="Account" back={() => nav("/settings")}>
-      <Group><MeCard /></Group>
+      <div className="ceyo-account-hero">
+        <button type="button" className="ceyo-account-photo" onClick={() => fileRef.current?.click()} disabled={photoBusy} aria-label="Change profile photo">
+          {me.avatar ? <img src={me.avatar} alt="" /> : <span>{(me.name || me.email || "C").charAt(0).toUpperCase()}</span>}
+          <i><Camera size={14} /></i>
+        </button>
+        <input ref={fileRef} type="file" accept="image/*" hidden onChange={(e) => void pickPhoto(e.target.files?.[0])} />
+      </div>
+      <Group>
+        <Row label="Name" value={me.name || "Add"} onClick={() => { setDraft(me.name); setEditing("name"); }} />
+        <Row label="Username" value={me.username ? `@${me.username}` : "Choose"} onClick={() => { setDraft(me.username); setCheck(""); setEditing("username"); }} />
+        <Row label="Email" value={me.email} right={<span />} />
+      </Group>
       <Group title="Switch Account">
         <Row label={me.email || "—"} right={<Check size={18} />} />
         <Row icon={<Plus size={20} />} label="Add Account" onClick={() => void addAccount()} right={<span />} />
@@ -447,7 +489,10 @@ function Plans({ nav }: { nav: Nav }) {
   );
 }
 
-type VaultItem = { id: string; kind: "login" | "card" | "contact"; title: string; detail: string; password?: string };
+type VaultItem = { id: string; kind: "login" | "card" | "contact"; title: string; detail: string; password?: string; holder?: string; expiry?: string; aiUsage?: string };
+const vaultDb = supabase as any;
+/** Bots read these fields through read_vault; passwords stay on this device only. */
+const vaultRow = (userId: string, item: VaultItem) => ({ id: item.id, user_id: userId, kind: item.kind, title: item.title, detail: item.detail, holder: item.holder || null, expiry: item.expiry || null, ai_usage: item.aiUsage || null });
 const VAULT_KEY = "ceyo_vault_v1";
 
 function Vault_({ nav }: { nav: Nav }) {
@@ -460,12 +505,29 @@ function Vault_({ nav }: { nav: Nav }) {
   const [detail, setDetail] = useState("");
   const menuRef = useRef<HTMLDivElement>(null);
   const [vaultKey, setVaultKey] = useState<string | null>(null);
+  const [vaultUser, setVaultUser] = useState<string | null>(null);
+  const [holder, setHolder] = useState("");
+  const [expiry, setExpiry] = useState("");
+  const [aiUsage, setAiUsage] = useState("");
   useEffect(() => {
-    void supabase.auth.getUser().then(({ data }) => {
+    void supabase.auth.getUser().then(async ({ data }) => {
       if (!data.user) return;
       const key = `${VAULT_KEY}:${data.user.id}`;
-      setVaultKey(key);
-      try { const saved: unknown = JSON.parse(readSetting(key) || "[]"); setItems(Array.isArray(saved) ? saved.filter((item): item is VaultItem => Boolean(item && typeof item === "object" && "id" in item && "title" in item && "detail" in item && "kind" in item && typeof item.id === "string" && typeof item.title === "string" && typeof item.detail === "string" && ["login", "card", "contact"].includes(item.kind))) : []); } catch { setItems([]); }
+      setVaultKey(key); setVaultUser(data.user.id);
+      let local: VaultItem[] = [];
+      try { const saved: unknown = JSON.parse(readSetting(key) || "[]"); local = Array.isArray(saved) ? saved.filter((item): item is VaultItem => Boolean(item && typeof item === "object" && "id" in item && "title" in item && "detail" in item && "kind" in item && typeof item.id === "string" && typeof item.title === "string" && typeof item.detail === "string" && ["login", "card", "contact"].includes(item.kind))) : []; } catch { local = []; }
+      setItems(local);
+      // Merge with the account copy so the same Vault shows on every device and bots can read it.
+      const remote = await vaultDb.from("vault_items").select("id,kind,title,detail,holder,expiry,ai_usage").eq("user_id", data.user.id).order("created_at", { ascending: false });
+      if (remote.error) return;
+      const byId = new Map(local.map((item) => [item.id, item]));
+      const merged: VaultItem[] = (remote.data || []).map((r: any) => ({ ...byId.get(r.id), id: r.id, kind: r.kind, title: r.title, detail: r.detail, holder: r.holder || undefined, expiry: r.expiry || undefined, aiUsage: r.ai_usage || undefined }));
+      const remoteIds = new Set(merged.map((item) => item.id));
+      const missing = local.filter((item) => !remoteIds.has(item.id) && !(item.kind === "card" && !/^\d{4}$/.test(item.detail)));
+      if (missing.length) await vaultDb.from("vault_items").upsert(missing.map((item) => vaultRow(data.user!.id, item)));
+      const next = [...merged, ...missing];
+      setItems(next);
+      saveSetting(key, JSON.stringify(next));
     });
   }, []);
   useEffect(() => {
@@ -479,10 +541,14 @@ function Vault_({ nav }: { nav: Nav }) {
   const [password, setPassword] = useState("");
   const [showPw, setShowPw] = useState(false);
   const save = (next: VaultItem[]) => { if (!vaultKey) return false; if (!saveSetting(vaultKey, JSON.stringify(next))) { toast.error("Could not save to this device."); return false; } setItems(next); return true; };
+  const syncAdd = (item: VaultItem) => { if (vaultUser) void vaultDb.from("vault_items").upsert(vaultRow(vaultUser, item)).then((r: any) => { if (r.error) toast.error("Saved on this device; couldn't sync to your account."); }); };
+  const syncRemove = (id: string) => { if (vaultUser) void vaultDb.from("vault_items").delete().eq("id", id).eq("user_id", vaultUser); };
   const shown = items.filter((item) => (tab === "all" || item.kind === tab) && `${item.title} ${item.detail}`.toLowerCase().includes(query.toLowerCase()));
   const labels = { login: "Login", card: "Card", contact: "Contact info" } as const;
   const count = (kind: VaultItem["kind"]) => items.filter((item) => item.kind === kind).length;
-  const openAdd = (kind: VaultItem["kind"]) => { setAdding(kind); setMenu(false); setTitle(""); setDetail(""); setPassword(""); setShowPw(false); };
+  const openAdd = (kind: VaultItem["kind"]) => { setAdding(kind); setMenu(false); setTitle(""); setDetail(""); setPassword(""); setShowPw(false); setHolder(""); setExpiry(""); setAiUsage(""); };
+  const expiryOk = /^(0[1-9]|1[0-2])\/\d{2}$/.test(expiry);
+  const cardReady = adding !== "card" || (/^\d{4}$/.test(detail.trim()) && expiryOk && holder.trim().length >= 2);
   return (
     <Shell
       className="ceyo-vault"
@@ -509,25 +575,33 @@ function Vault_({ nav }: { nav: Nav }) {
         if (!title.trim()) return;
         if (adding === "login" && (!detail.trim() || !password)) { toast.error("Enter the email or username and the password"); return; }
         try { validateVaultDetail(adding, detail); } catch (error) { toast.error(error instanceof Error ? error.message : "Invalid details"); return; }
-        if (!save([{ id: crypto.randomUUID(), kind: adding, title: title.trim(), detail: detail.trim(), ...(adding === "login" && password ? { password } : {}) }, ...items])) return;
+        if (adding === "card" && !cardReady) { toast.error("Enter the cardholder name, last 4 digits and expiry (MM/YY)"); return; }
+        const item: VaultItem = { id: crypto.randomUUID(), kind: adding, title: title.trim(), detail: detail.trim(), ...(adding === "login" && password ? { password } : {}), ...(adding === "card" ? { holder: holder.trim(), expiry, aiUsage: aiUsage.trim() || undefined } : {}) };
+        if (!save([item, ...items])) return;
+        syncAdd(item);
         setAdding(null);
         toast.success("Saved to your vault");
       }}>
         <div className="ceyo-vault-fields">
           <label className="ceyo-vault-field"><span>{adding === "login" ? "Website" : adding === "card" ? "Card name" : "Label"}</span><input aria-label="Title" maxLength={100} placeholder={adding === "login" ? "example.com" : adding === "card" ? "e.g. Travel" : "e.g. Home"} value={title} onChange={(event) => setTitle(event.target.value)} autoFocus /></label>
           <label className="ceyo-vault-field"><span>{adding === "login" ? "Username or email" : adding === "card" ? "Last 4 digits" : "Contact details"}</span><input aria-label="Details" maxLength={adding === "card" ? 4 : 160} inputMode={adding === "card" ? "numeric" : "text"} pattern={adding === "card" ? "[0-9]{4}" : undefined} placeholder={adding === "login" ? "name@example.com" : adding === "card" ? "1234" : "Phone, email or address"} value={detail} onChange={(event) => setDetail(event.target.value)} autoComplete={adding === "login" ? "username" : undefined} /></label>
+          {adding === "card" && <>
+            <label className="ceyo-vault-field"><span>Cardholder name</span><input aria-label="Cardholder name" maxLength={100} autoComplete="cc-name" placeholder="Name on the card" value={holder} onChange={(event) => setHolder(event.target.value)} /></label>
+            <label className="ceyo-vault-field"><span>Expiry date</span><input aria-label="Expiry date" inputMode="numeric" maxLength={5} autoComplete="cc-exp" placeholder="MM/YY" value={expiry} onChange={(event) => { const d = event.target.value.replace(/\D/g, "").slice(0, 4); setExpiry(d.length > 2 ? `${d.slice(0, 2)}/${d.slice(2)}` : d); }} /></label>
+            <label className="ceyo-vault-field"><span>What can the AI use this card for?</span><textarea aria-label="What can the AI use this card for" maxLength={1000} rows={3} placeholder="e.g. Only subscriptions and online groceries, up to $50 a month" value={aiUsage} onChange={(event) => setAiUsage(event.target.value)} /></label>
+          </>}
           {adding === "login" && <label className="ceyo-vault-field"><span>Password</span><span className="flex items-center gap-2"><input aria-label="Password" type={showPw ? "text" : "password"} autoComplete="current-password" maxLength={200} placeholder="••••••••" value={password} onChange={(event) => setPassword(event.target.value)} className="min-w-0 flex-1" /><Button variant="ghost" size="sm" type="button" onClick={() => setShowPw((v) => !v)}>{showPw ? "Hide" : "Show"}</Button></span></label>}
         </div>
-        <p className="ceyo-vault-note">{adding === "card" ? "Only the last four digits are saved. Never enter a full card number or security code." : adding === "login" ? "Website, email or username, and password are saved on this device only, privately for your account." : "Saved on this device, privately for your account."}</p>
-        <Button variant="ghost" type="submit" className="ceyo-vault-save" disabled={!title.trim() || (adding === "login" && (!detail.trim() || !password))}>{adding === "card" ? "Add card" : adding === "contact" ? "Save contact info" : "Save login"}</Button>
+        <p className="ceyo-vault-note">{adding === "card" ? "For your safety Ceyo saves only the last four digits — never the full card number or the security code (CVC). Your bots can read this card's name, holder, expiry and allowed use." : adding === "login" ? "Website, email or username, and password are saved on this device only, privately for your account." : "Saved on this device, privately for your account."}</p>
+        <Button variant="ghost" type="submit" className="ceyo-vault-save" disabled={!title.trim() || !cardReady || (adding === "login" && (!detail.trim() || !password))}>{adding === "card" ? "Add card" : adding === "contact" ? "Save contact info" : "Save login"}</Button>
       </form>}
       {!adding && shown.length > 0 && <div className="ceyo-vault-list">{shown.map((item) => <div className="ceyo-vault-row" key={item.id}>
         <span className="ceyo-row-icon">{item.kind === "card" ? <CreditCard size={18} /> : item.kind === "login" ? <KeyRound size={18} /> : <User size={18} />}</span>
-        <span><strong>{item.title}</strong><small>{item.detail}{item.password ? " · ••••••••" : ""}</small></span>
-        <Button variant="ghost" size="icon" type="button" aria-label={`Delete ${item.title}`} onClick={() => save(items.filter((candidate) => candidate.id !== item.id))}><Trash2 size={16} /></Button>
+        <span><strong>{item.title}</strong><small>{item.kind === "card" ? `•••• ${item.detail}${item.expiry ? ` · ${item.expiry}` : ""}${item.holder ? ` · ${item.holder}` : ""}` : item.detail}{item.password ? " · ••••••••" : ""}</small>{item.aiUsage && <small className="ceyo-vault-usage">AI may use for: {item.aiUsage}</small>}</span>
+        <Button variant="ghost" size="icon" type="button" aria-label={`Delete ${item.title}`} onClick={() => { if (save(items.filter((candidate) => candidate.id !== item.id))) syncRemove(item.id); }}><Trash2 size={16} /></Button>
       </div>)}</div>}
       {!shown.length && !adding && <div className="hub-empty-state"><span className="hub-empty-icon"><Vault size={22} /></span><strong>{items.length ? "No matching items" : "Your vault is empty"}</strong><p>{items.length ? "Try another search or category." : "Add a login, card label or contact info from the + button."}</p></div>}
-      {!adding && <><p className="ceyo-vault-note">Ceyo never stores a saved card's full number or security code. Logins and contact info are saved on this device.</p>
+      {!adding && <><p className="ceyo-vault-note">Ceyo never stores a card's full number or security code. Your bots can read the Vault; passwords stay on this device only.</p>
       <div className="ceyo-bottom-search"><Search size={20} /><input aria-label="Search Vault" placeholder="Search Vault" value={query} onChange={(event) => setQuery(event.target.value)} /></div></>}
     </Shell>
   );

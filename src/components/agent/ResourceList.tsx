@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { loadArtifact } from "@/lib/computer/artifactClient";
 
-export function ResourceList({ kind, query = "", botId }: { kind: "files" | "routines"; query?: string; botId?: string }) {
+export function ResourceList({ kind, query = "", botId, primary = false }: { kind: "files" | "routines"; query?: string; botId?: string; primary?: boolean }) {
   const [rows, setRows] = useState<any[]>([]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
@@ -13,6 +13,9 @@ export function ResourceList({ kind, query = "", botId }: { kind: "files" | "rou
   const refresh = async () => {
     const db = supabase as any;
     let request = db.from(table).select("*").order("created_at", { ascending: false }).limit(100);
+    // A bot's library holds only its own files; the primary bot also keeps files saved before libraries were per bot.
+    const ownFiles = (q: any) => !botId ? q : primary ? q.or(`bot_id.eq.${botId},bot_id.is.null`) : q.eq("bot_id", botId);
+    if (kind === "files") request = ownFiles(request);
     if (kind === "routines" && botId) {
       const { data, error: convError } = await db.from("conversations").select("id").eq("bot_id", botId);
       if (convError) { setError(convError.message); setLoading(false); return; }
@@ -20,13 +23,13 @@ export function ResourceList({ kind, query = "", botId }: { kind: "files" | "rou
     }
     const { data, error: readError } = await request;
     if (kind === "files") {
-      const artifacts = await supabase.from("agent_artifacts").select("id,name,mime,created_at").order("created_at", { ascending: false }).limit(100);
+      const artifacts = await ownFiles(db.from("agent_artifacts").select("id,name,mime,created_at").order("created_at", { ascending: false }).limit(100));
       setRows([...(data || []), ...(artifacts.data || []).map((row) => ({ ...row, artifact: true }))]);
       setError(readError?.message || artifacts.error?.message || "");
     } else { setRows(data || []); setError(readError?.message || ""); }
     setLoading(false);
   };
-  useEffect(() => { void refresh(); }, [kind, botId]);
+  useEffect(() => { void refresh(); }, [kind, botId, primary]);
   const remove = async (id: string) => {
     const row = rows.find((item) => item.id === id);
     if (row?.artifact) {

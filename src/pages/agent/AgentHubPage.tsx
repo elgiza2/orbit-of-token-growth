@@ -1,4 +1,5 @@
 import { getCachedUser } from "@/lib/cachedUser";
+import { useMyProfile } from "@/lib/profile/myProfile";
 import { askConfirm, askText } from "@/components/common/CeyoConfirm";
 import { toast } from "sonner";
 /** Grok-style home for Ceyo bots and multi-bot groups, backed by real AgentSky chats. */
@@ -94,6 +95,7 @@ export default function AgentHubPage({ demo = false }: { demo?: boolean }) {
   const [userId, setUserId] = useState(() => (demo ? "demo" : cachedOwner() || ""));
   const [userAvatar, setUserAvatar] = useState("");
   const [userInitial, setUserInitial] = useState("C");
+  const myProfile = useMyProfile();
   const [local, setLocal] = useState<HubLocalState>(demo ? { ...EMPTY_HUB_LOCAL, groups: [DEMO_GROUP] } : EMPTY_HUB_LOCAL);
   const [storageReady, setStorageReady] = useState(demo);
   const [busy, setBusy] = useState(false);
@@ -380,7 +382,7 @@ export default function AgentHubPage({ demo = false }: { demo?: boolean }) {
   const listContent = (
     <aside className="hub-home" aria-label={ar ? "البوتات والجروبات" : "Bots and groups"}>
       <header className="hub-home-header">
-        <button type="button" aria-label="Account" className="hub-user-avatar" onClick={() => nav("/settings")}>{userAvatar ? <img src={userAvatar} alt="" /> : <span>{userInitial}</span>}</button>
+        <button type="button" aria-label="Account" className="hub-user-avatar" onClick={() => nav("/settings")}>{(myProfile?.avatarUrl || userAvatar) ? <img src={myProfile?.avatarUrl || userAvatar} alt="" /> : <span>{(myProfile?.displayName?.[0] || userInitial).toUpperCase()}</span>}</button>
         <div className="hub-plus-wrap" ref={plusRef}>
           <HubIconButton label={ar ? "إنشاء" : "Create"} onClick={() => setPlusOpen((open) => !open)} active={plusOpen}><Plus size={22} /></HubIconButton>
           {plusOpen && <div className="hub-menu hub-plus-menu" role="menu"><button type="button" role="menuitem" onClick={() => go({ new: "bot" })}>{ar ? "بوت جديد" : "New Bot"}</button><button type="button" role="menuitem" onClick={() => go({ new: "pgroup" })}>{ar ? "جروب جديد" : "New Group"}</button><button type="button" role="menuitem" onClick={() => go({ new: "dm" })}>{ar ? "رسالة لشخص" : "New Message"}</button></div>}

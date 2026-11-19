@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { getAuthState } from "@/lib/authStore";
 import { useNavigate } from "react-router-dom";
 import { ArrowDownToLine, Check, ChevronLeft, Copy, QrCode, Search, Send, X } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
@@ -30,7 +31,12 @@ export default function WalletPage() {
   const [markets, setMarkets] = useState<Record<string, Market>>({});
   const [priceError, setPriceError] = useState(false);
   const [addresses, setAddresses] = useState<Addresses | null>(null);
-  const [balances, setBalances] = useState<Record<string, number>>({});
+  const [balances, setBalancesState] = useState<Record<string, number>>({});
+  // Last known balances show instantly; fresh reads replace them per network as they arrive.
+  const cacheKey = `ceyo_wallet_cache_v1:${getAuthState().userId || ""}`;
+  const setBalances = (next: Record<string, number>) => setBalancesState((prev) => { const merged = { ...prev, ...next }; try { localStorage.setItem(cacheKey, JSON.stringify({ balances: merged, addresses: addressesRef.current })); } catch { /* optional */ } return merged; });
+  const addressesRef = useRef<Addresses | null>(null);
+  useEffect(() => { try { const c = JSON.parse(localStorage.getItem(cacheKey) || "null"); if (c?.balances) setBalancesState(c.balances); if (c?.addresses) { addressesRef.current = c.addresses; setAddresses(c.addresses); } } catch { /* ignore */ } }, [cacheKey]);
   const [walletError, setWalletError] = useState("");
   const [qr, setQr] = useState<Token | null>(null);
   const [copied, setCopied] = useState("");
@@ -38,7 +44,7 @@ export default function WalletPage() {
   useEffect(() => {
     let ctrl = new AbortController();
     const load = () => fetchMarkets(ctrl.signal).then((m) => { setMarkets(m); setPriceError(false); }).catch(() => { if (!ctrl.signal.aborted) setPriceError(true); });
-    const loadWallet = () => fetchWallet().then((w) => { setAddresses(w.addresses); setBalances(w.balances); setWalletError(""); }).catch((e) => setWalletError(userErrorText(e, "Balance unavailable. Please try again.")));
+    const loadWallet = () => fetchWallet().then((w) => { addressesRef.current = w.addresses; setAddresses(w.addresses); setBalances(w.balances); setWalletError(""); }).catch((e) => setWalletError(userErrorText(e, "Balance unavailable. Please try again.")));
     load(); void loadWallet();
     const t = setInterval(() => { ctrl.abort(); ctrl = new AbortController(); load(); }, 30000);
     const tw = setInterval(() => { void loadWallet(); }, 60000);

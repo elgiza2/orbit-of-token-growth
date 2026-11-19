@@ -20,7 +20,7 @@ export function telegramAdminIds(config: string | undefined): number[] {
   return (config ?? "").split(",").map((v) => v.trim()).filter((v) => /^[1-9]\d*$/.test(v)).map(Number).filter(Number.isSafeInteger);
 }
 
-type ProviderId = "cerebras" | "browserbase" | "composio" | "e2b" | "pexels" | "pixabay" | "apify" | "deepgram" | "cartesia" | "anam" | "telnyx";
+type ProviderId = "cerebras" | "browserbase" | "composio" | "e2b" | "pexels" | "pixabay" | "apify" | "deepgram" | "cartesia" | "anam" | "telnyx" | "kashier_merchant_id" | "kashier_api_key";
 const PROVIDERS: Record<ProviderId, { label: string; icon: string; use: string }> = {
   cerebras: { label: "Cerebras", icon: "🧠", use: "ذكاء اصطناعي — ردود الوكلاء" },
   browserbase: { label: "Browserbase", icon: "🌐", use: "كمبيوتر — تصفح الويب" },
@@ -33,6 +33,8 @@ const PROVIDERS: Record<ProviderId, { label: string; icon: string; use: string }
   apify: { label: "Apify", icon: "🕷️", use: "أدوات — جمع البيانات من المواقع" },
   pexels: { label: "Pexels", icon: "🎬", use: "أدوات — صور ولقطات للمونتاج" },
   pixabay: { label: "Pixabay", icon: "🎞️", use: "أدوات — فيديوهات وصور مجانية" },
+  kashier_merchant_id: { label: "Kashier Merchant ID", icon: "🏦", use: "الدفع — رقم التاجر من لوحة Kashier (MID-...)" },
+  kashier_api_key: { label: "Kashier API Key", icon: "💳", use: "الدفع — Payment API Key من لوحة Kashier" },
 };
 const IDS = Object.keys(PROVIDERS) as ProviderId[];
 
@@ -42,6 +44,8 @@ export function normalizeProvider(raw: string): ProviderId | null {
   if (v === "browser" || v === "b") return "browserbase";
   if (v === "x") return "composio";
   if (v === "computer") return "e2b";
+  if (v === "kashier_mid" || v === "mid") return "kashier_merchant_id";
+  if (v === "kashier" || v === "kashier_key") return "kashier_api_key";
   return (IDS as string[]).includes(v) ? (v as ProviderId) : null;
 }
 

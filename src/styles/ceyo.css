@@ -847,3 +847,6 @@ html,body{background-color:#141414}
 .cx-chat .cx-composer{-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);will-change:auto}
 .cx-chat .cx-scroll{overscroll-behavior:contain}
 html[data-theme="light"][data-ceyo-surface="bot"] .agent-hub{--hub-bg:oklch(0.985 0 0);--hub-surface-soft:oklch(0.96 0 0)}
+/* Swipe a message sideways to reply; vertical scrolling stays native. */
+.cx-row, .pp-row, .pp-msg { touch-action: pan-y; }
+.cx-row[data-swipe-ready="true"]::before { content: "↩"; position: absolute; inset-inline-start: -28px; top: 50%; transform: translateY(-50%); opacity: .7; font-size: 18px; }

@@ -5,16 +5,18 @@
 - [x] Welcome "Continue" button readable in every state.
 - [x] Home: bot section fold buttons work (incl. Unassigned) and are remembered.
 - [x] Text selection/copy only inside input boxes.
-- [ ] Account: username shown and editable (unique), profile photo change and shown everywhere.
-- [ ] People chats: live new messages, user profile sheet (username + shared items), menu: delete for both / block.
-- [ ] Bot can find a user by username and send them a message.
-- [ ] Wallet balance appears instantly (last known balance cached) with provider timeouts.
-- [ ] Bot profile library shows only that bot's files.
-- [ ] Notifications: no repeats; island-style design.
-- [ ] Vault: button colors, card form (name, holder, last 4, expiry, AI usage note; no CVC), bot can read vault.
-- [ ] AI replies stream word by word with typing animation; faster first word.
-- [ ] Swipe a message to reply (people + bot chats).
-- [ ] Payments: diagnose why checkout fails.
+- [x] Account: username shown and editable (unique), profile photo change and shown everywhere.
+- [x] People chats: live new messages, user profile sheet (username + shared items), menu: delete for both / block.
+- [x] Bot can find a user by username and send them a message.
+- [x] Wallet balance appears instantly (last known balance cached) with provider timeouts.
+- [x] Bot profile library shows only that bot's files.
+- [x] Notifications: no repeats; island-style design; browser asks permission on first tap.
+- [x] Vault: button colors, card form (name, holder, last 4, expiry, AI usage note; no CVC), bot can read vault.
+- [x] AI replies stream live after a short checked opening (no retraction).
+- [x] Swipe a message to reply (people + bot chats).
+- [x] Payments: cause found — Kashier Merchant ID and API key are not saved in this backend; admin Telegram bot can now accept them.
+- [ ] Owner: add Kashier Merchant ID + API Key through the admin Telegram bot, then test a real payment.
+- [ ] Signed-in device check of Account, Vault, people chats and live replies (preview sign-in not available to the agent for this backend).
 
 ## Marketer page matra.ceyo.app, Telegram admin bot, chat keeps running — 2026-11-19
 - [x] Import repo into this project (own Supabase, no Lovable Cloud).

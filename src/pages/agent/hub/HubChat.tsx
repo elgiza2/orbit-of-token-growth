@@ -1,4 +1,5 @@
 import { consumePhonePrompt, phoneLiveEnd, phoneLiveUpdate, phoneReply, phoneSpeak, takePhoneVoiceReply } from "@/lib/native/assistantBridge";
+import { useSwipeReply } from "@/hooks/useSwipeReply";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { FormattedAnswer } from "@/components/chat/FormattedAnswer";
 import { appCopyRestricted } from "@/lib/appInteractionPolicy";
@@ -298,6 +299,7 @@ export function HubChat({
   const [pinned, setPinned] = useState(true);
   const [sheet, setSheet] = useState<Bubble | null>(null);
   const [replyTo, setReplyTo] = useState<string | null>(null);
+  const swipeReply = useSwipeReply<string>((text) => setReplyTo(text.replace(/^> [^\n]*\n\n/, "").slice(0, 200)));
   const [selectable, setSelectable] = useState<string | null>(null);
   const [reactions, setReactions] = useState<Record<string, string>>({});
   const [pinOverrides, setPinOverrides] = useState<Record<string, boolean>>({});
@@ -636,7 +638,7 @@ export function HubChat({
                 <div key={b.key} id={`cx-${b.key}`} className="cx-row-wrap">
                   {showDay && <p className="cx-day">{new Date(b.at || "").toDateString() === new Date().toDateString() ? (ar ? "النهارده " : "Today ") : ""}{time}</p>}
                   {b.role === "user" ? (
-                    <div className="cx-row cx-row-user">
+                    <div className="cx-row cx-row-user" {...swipeReply(b.text)}>
                       <div data-no-translate className="cx-bubble cx-bubble-user" data-hit={hit} data-select={selectable === b.key} dir="auto" {...handlers}>
                         {b.partIndex === 0 && Array.isArray(b.turn.images) && b.turn.images.length > 0 && <span className="cx-user-images">{b.turn.images.map((src: string, k: number) => <img key={k} src={src} alt="" />)}</span>}
                         {b.turn.voiceOrigin === "recording" && b.turn.recordingId ? <VoiceMessage own text={b.text} recordingId={b.turn.recordingId} agentId={agent.id} agentIds={agents.map((a) => a.id)} settings={voiceSettings} ar={ar} /> : b.text.startsWith("> ") ? (() => { const [quote, ...rest] = b.text.split("\n\n"); return <><span className="cx-quote">{quote.slice(2)}</span><Highlight text={rest.join("\n\n")} q={q} /></>; })() : <CollapsibleText text={b.text} ar={ar}><Highlight text={b.text} q={q} /></CollapsibleText>}
@@ -645,7 +647,7 @@ export function HubChat({
                       <span className="cx-time">{time}</span>
                     </div>
                   ) : !b.text && !(b.lastPart && b.turn.cards?.length) ? null : (
-                    <div className="cx-row cx-row-agent">
+                    <div className="cx-row cx-row-agent" {...swipeReply(b.text)}>
                       <div className="cx-avatar"><BotAvatar agent={b.speaker || agent} size={22} state="idle" /></div>
                       <div className="cx-agent-body">
                         {(group || b.partIndex === 0) && <span className="cx-author" dir="auto">{b.speaker?.name || title}</span>}

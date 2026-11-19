@@ -2,7 +2,7 @@ import { getCachedUser } from "@/lib/cachedUser";
 import { useEffect, useRef } from "react";
 
 import { supabase } from "@/integrations/supabase/client";
-import { notifyJobComplete } from "@/lib/notifyJobComplete";
+import { ensureNotificationPermission, notifyJobComplete } from "@/lib/notifyJobComplete";
 import { claimNotification, markNotified } from "@/lib/notifications/dedupe";
 import { hasPhoneAssistant, phoneLiveEnd, phoneReply } from "@/lib/native/assistantBridge";
 
@@ -123,20 +123,22 @@ export default function BackgroundJobNotifier() {
 
       // Seed `seen` with what already finished so we don't replay old work.
       const since = new Date(Date.now() - 10 * 60_000).toISOString();
-      const { data: old } = await supabase
-        .from("agent_jobs" as any)
-        .select("id,status")
-        .eq("user_id", userId)
-        .in("status", ["completed", "failed"])
-        .gte("updated_at", since)
-        .limit(50);
-      const { data: oldRuns } = await supabase
-        .from("agent_routine_runs" as any)
-        .select("id")
-        .eq("user_id", userId)
-        .in("status", ["completed", "failed", "done", "error"])
-        .gte("updated_at", since)
-        .limit(50);
+      const [{ data: old }, { data: oldRuns }] = await Promise.all([
+        supabase
+          .from("agent_jobs" as any)
+          .select("id,status")
+          .eq("user_id", userId)
+          .in("status", ["completed", "failed"])
+          .gte("updated_at", since)
+          .limit(50),
+        supabase
+          .from("agent_routine_runs" as any)
+          .select("id")
+          .eq("user_id", userId)
+          .in("status", ["completed", "failed", "done", "error"])
+          .gte("updated_at", since)
+          .limit(50),
+      ]);
       const oldIds = [...((old as any[] | null) || []).map((r) => `job:${r.id}`), ...((oldRuns as any[] | null) || []).map((r) => `run:${r.id}`)];
       oldIds.forEach((id) => seen.current.add(id));
       markNotified(oldIds);
@@ -167,8 +169,13 @@ export default function BackgroundJobNotifier() {
 
     void start().catch(() => { /* Realtime is optional; do not crash navigation. */ });
 
+    // Notifications are always on: on the web the browser asks once, on the first tap after sign-in.
+    const askOnce = () => { window.removeEventListener("pointerdown", askOnce); if (!cancelled && !hasPhoneAssistant()) void ensureNotificationPermission(); };
+    if (typeof Notification !== "undefined" && Notification.permission === "default") window.addEventListener("pointerdown", askOnce, { once: true });
+
     return () => {
       cancelled = true;
+      window.removeEventListener("pointerdown", askOnce);
       if (timer) window.clearInterval(timer);
       if (jobChannel) void supabase.removeChannel(jobChannel);
       if (runChannel) void supabase.removeChannel(runChannel);

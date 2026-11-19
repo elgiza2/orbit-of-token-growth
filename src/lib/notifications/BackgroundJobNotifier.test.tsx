@@ -3,10 +3,10 @@ import { beforeEach, expect, it, vi } from "vitest";
 
 const fake = vi.hoisted(() => ({ channel: vi.fn(), remove: vi.fn(), seed: null as null | ((v: unknown) => void) }));
 vi.mock("@/integrations/supabase/client", () => ({ supabase: {
-  auth: { getUser: async () => ({ data: { user: { id: "owner" } } }) },
+  auth: { getUser: async () => ({ data: { user: { id: "owner" } } }), getSession: async () => ({ data: { session: { user: { id: "owner" } } } }), onAuthStateChange: () => ({ data: { subscription: { unsubscribe() {} } } }) },
   channel: fake.channel, removeChannel: fake.remove,
   from: () => { const query: Record<string, unknown> = {}; for (const method of ["select", "eq", "in", "gte"]) query[method] = () => query;
-    query.limit = () => new Promise((resolve) => { fake.seed = resolve; }); return query; },
+    query.limit = () => new Promise((resolve) => { const prev = fake.seed; fake.seed = (v) => { prev?.(v); resolve(v); }; }); return query; },
 } }));
 vi.mock("@/lib/notifyJobComplete", () => ({ notifyJobComplete: vi.fn() }));
 import Notifier from "./BackgroundJobNotifier";

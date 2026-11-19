@@ -106,3 +106,9 @@
 @media(max-height:680px){.ceyo-plans .ceyo-plans-brand{min-height:32px}.ceyo-plans .ceyo-plans-title{margin:6px 0 10px!important}.ceyo-plans .ceyo-plans-card ul{gap:4px}.ceyo-plans .ceyo-plans-tabs button{height:34px}.ceyo-plans .ceyo-plans-sub{margin-bottom:4px}.ceyo-plans .ceyo-plans-cta{height:40px}.ceyo-plans .ceyo-plans-prices button{min-height:52px}}.ceyo-vault-field textarea { width:100%;min-width:0;padding:0;border:0;outline:none;resize:none;background:transparent;color:var(--cv-ink);font-size:16px;line-height:1.45;font-family:inherit; }
 .ceyo-vault-field textarea::placeholder { color:var(--cv-muted); }
 .ceyo-vault .ceyo-vault-row small.ceyo-vault-usage { display:block;margin-top:2px;font-size:12.5px;color:var(--cv-muted); }
+
+/* Vault uses the same palette as the other Settings pages, in dark and light themes. */
+.agent-hub.ceyo-vault { --cv-page:#1e1e1e;--cv-panel:#2a2a2c;--cv-line:rgba(255,255,255,.08);--cv-ink:#f5f5f7;--cv-muted:#9a9a9c;--cv-active:#3a3a3c;--cv-pricing:#111113; }
+html[data-theme="light"] .agent-hub.ceyo-vault { --cv-page:#f2f2f7;--cv-panel:#ffffff;--cv-line:rgba(0,0,0,.08);--cv-ink:#1c1c1e;--cv-muted:#6b6b70;--cv-active:#e5e5ea;--cv-pricing:#ffffff; }
+.agent-hub.ceyo-vault .ceyo-vault-tabs button[data-active=true] span { color:var(--cv-ink); }
+.agent-hub.ceyo-vault .ceyo-vault-menu button:hover, .agent-hub.ceyo-vault .gx-round:hover { background:var(--cv-active); }

@@ -1,4 +1,5 @@
 import { grepCodeScript, codeOutlineScript, gitScript, gitActions, zipProjectScript } from "@/lib/computer/codeTools";
+import { liveStreamReady, safeVisibleLength } from "./liveStream";
 import { CEREBRAS_MODELS } from "@/lib/keys/cerebrasKey";
 import { isBigTask, modelsFor, pickRole } from "@/lib/models/modelRouter";
 import { COARENA_MODEL, COARENA_URL, getCerebrasKeys, markCerebrasFailure, markCerebrasUse, type CerebrasKey } from "@/lib/keys/cerebrasKey";
@@ -321,6 +322,15 @@ export async function runAgentLoop(
     let n = 0;
     let dropped = false;
     let stepTokens = 0;
+    // Live text: after a short checked prefix the answer streams as it is written (see liveStream.ts).
+    let live = false;
+    let shown = 0;
+    const toolNames = allTools.map((t: any) => t?.function?.name).filter(Boolean);
+    const pushLive = (final = false) => {
+      const vis = text.trimStart();
+      const upto = final ? vis.length : safeVisibleLength(vis);
+      if (upto > shown) { emit({ id: `${sid}-t${n++}`, type: "agent.message", parts: [{ type: "text", text: vis.slice(shown, upto), stream_id: `${sid}-t` }] }); shown = upto; }
+    };
     for (;;) {
       let chunk: ReadableStreamReadResult<Uint8Array>;
       // A dropped stream surfaces as a raw "fetch failed"; give the user a clear, actionable message instead.
@@ -343,7 +353,11 @@ export async function runAgentLoop(
         if (d.refusal) throw new Error(d.refusal);
         if (d.reasoning) emit({ id: `${sid}-r${n++}`, type: "agent.reasoning", part: { type: "reasoning", text: d.reasoning, stream_id: `${sid}-r` } });
         // Text is held until the step ends (Cerebras is fast) so a refusal or fake tool call can be retried unseen.
-        if (d.content) text += d.content;
+        if (d.content) {
+          text += d.content;
+          if (!live && liveStreamReady(text, toolNames, calls.length > 0)) live = true;
+          if (live) pushLive();
+        }
         for (const tc of d.tool_calls ?? []) {
           const k = tc.index ?? 0;
           calls[k] ??= { id: tc.id || `${sid}-c${k}`, name: "", args: "" };
@@ -360,6 +374,8 @@ export async function runAgentLoop(
       void (await import("./usage.server")).recordTrialTokens(opts.usageOwner, stepTokens || estimate).catch(() => {});
     }
     if (dropped) {
+      // Text already on screen cannot be silently redone; keep it and let the user continue.
+      if (live) throw new Error("The connection dropped for a moment. Send it again and I'll pick up where I left off.");
       if (streamRetries++ >= 2) throw new Error("The connection dropped for a moment. Send it again and I'll pick up where I left off.");
       await new Promise((r) => setTimeout(r, 1000 * streamRetries));
       step--;
@@ -367,12 +383,12 @@ export async function runAgentLoop(
     }
     // Qwen sends whitespace-only content alongside tool calls; drop it so answers have no blank gaps.
     text = text.trim();
-    const flush = () => { if (text) emit({ id: `${sid}-t${n++}`, type: "agent.message", parts: [{ type: "text", text, stream_id: `${sid}-t` }] }); };
+    const flush = () => { if (live) { text = text.trimEnd(); pushLive(true); } else if (text) emit({ id: `${sid}-t${n++}`, type: "agent.message", parts: [{ type: "text", text, stream_id: `${sid}-t` }] }); };
     answer += (answer && text ? "\n\n" : "") + text;
     const real = calls.filter(Boolean);
     const steer = await poll();
     if (!real.length) {
-      if (!steer.length && !techAskNudged && looksLikeTechnicalAsk(text)) {
+      if (!live && !steer.length && !techAskNudged && looksLikeTechnicalAsk(text)) {
         // Asking an everyday user for IDs, code or API steps: find it out with tools instead.
         techAskNudged = true;
         answer = answer.slice(0, answer.length - text.length).trimEnd();
@@ -380,15 +396,15 @@ export async function runAgentLoop(
         messages.push({ role: "user", content: "I'm not technical — don't ask me for IDs, API details or code steps. Find what you need yourself with your tools (read_telegram_messages, telegram_bot getMe/getUpdates, web_search, browser, run_code, http_request, list_connected_accounts) and do the task. If something truly needs me, tell me in 1-3 simple steps using the app's button names, in my language, no technical words." });
         continue;
       }
-      if (!steer.length && fakeToolNudges < 2 && looksLikeFakeToolCall(text, allTools.map((t: any) => t?.function?.name).filter(Boolean))) {
-        // The model wrote a tool call as plain text; make it call the real tool.
+      if (!steer.length && fakeToolNudges < 2 && looksLikeFakeToolCall(text, toolNames)) {
+        // The model wrote a tool call as plain text; make it call the real tool (text already shown stays).
         fakeToolNudges++;
-        answer = answer.slice(0, answer.length - text.length).trimEnd();
+        if (live) flush(); else answer = answer.slice(0, answer.length - text.length).trimEnd();
         messages.push({ role: "assistant", content: text });
         messages.push({ role: "user", content: "You wrote a tool call as text, so nothing happened. Call the actual tool now (function call), then continue the task." });
         continue;
       }
-      if (!steer.length && !refusalNudged && toolsUsed === 0 && looksLikeRefusal(text)) {
+      if (!live && !steer.length && !refusalNudged && toolsUsed === 0 && looksLikeRefusal(text)) {
         // Grok-style: try the tools before declining or handing the user manual steps.
         refusalNudged = true;
         answer = answer.slice(0, answer.length - text.length).trimEnd();

@@ -1,7 +1,6 @@
 import { userErrorText } from "@/lib/errors";
 import "@/styles/ceyo.css";
 import "@/styles/settings-polish.css";
-import { VoiceSettingsFields } from "./VoiceControls";
 import { ResourceList } from "@/components/agent/ResourceList";
 import { useMemo, useRef, useState, type ReactNode } from "react";
 import { fileToAvatar, writeGroupAvatar } from "./chatPrefs";
@@ -83,7 +82,7 @@ export function AgentForm({
   const [name, setName] = useState(initial?.name || "");
   const [shape, setShape] = useState(start.shape);
   const [hex, setHex] = useState(start.hex);
-  const [v, setV] = useState<VoiceSettings>(voice);
+  const v = voice;
   const [description, setDescription] = useState(initial?.description || "");
   const [prompt, setPrompt] = useState(initial?.prompt || "");
   const ar = false;
@@ -122,7 +121,6 @@ export function AgentForm({
         ))}</div>
         {title !== "" && <p className="st-field-label">{ar ? "اللون" : "Color"}</p>}
         <div className="gx-colors">{BOT_COLORS.map((c) => <button type="button" key={c.hex} aria-label={c.hex} data-active={hex === c.hex} style={{ background: c.hex }} onClick={() => setHex(c.hex)} />)}</div>
-        <div className="gx-voice"><p className="cx-field-label">{lang === "ar" ? "الصوت واللغة" : "Voice & language"}</p><VoiceSettingsFields value={v} onChange={setV} /></div>
       </div>
       {error && <p className="gx-error" role="alert">{userErrorText(error)}</p>}
       <div className="gx-create-foot"><button type="button" className="gx-create-cta" disabled={!ok} onClick={submit}>{busy ? "…" : cta || (initial ? (ar ? "حفظ" : "Save") : (ar ? "إنشاء" : "Create"))}</button></div>

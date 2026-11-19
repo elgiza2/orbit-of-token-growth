@@ -1,3 +1,21 @@
+## Owner's 24-point list (speed, chats, account, vault) — 2026-11-19
+- [x] Integrations: remove "N connected"; fix app logo in the app detail sheet.
+- [x] Settings: remove Phone settings row and Notifications switch (always on, asked automatically on web; Android uses the app's own permission).
+- [x] Create-bot screen: smaller color/shape buttons; voice & language picker removed.
+- [x] Welcome "Continue" button readable in every state.
+- [x] Home: bot section fold buttons work (incl. Unassigned) and are remembered.
+- [x] Text selection/copy only inside input boxes.
+- [ ] Account: username shown and editable (unique), profile photo change and shown everywhere.
+- [ ] People chats: live new messages, user profile sheet (username + shared items), menu: delete for both / block.
+- [ ] Bot can find a user by username and send them a message.
+- [ ] Wallet balance appears instantly (last known balance cached) with provider timeouts.
+- [ ] Bot profile library shows only that bot's files.
+- [ ] Notifications: no repeats; island-style design.
+- [ ] Vault: button colors, card form (name, holder, last 4, expiry, AI usage note; no CVC), bot can read vault.
+- [ ] AI replies stream word by word with typing animation; faster first word.
+- [ ] Swipe a message to reply (people + bot chats).
+- [ ] Payments: diagnose why checkout fails.
+
 ## Marketer page matra.ceyo.app, Telegram admin bot, chat keeps running — 2026-11-19
 - [x] Import repo into this project (own Supabase, no Lovable Cloud).
 - [x] matra.ceyo.app landing: counts visits, links carry ?ref=matra, signups linked to marketer once.

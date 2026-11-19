@@ -49,7 +49,6 @@ function Apps({ nav, appId }: { nav: Nav; appId?: string }) {
     observer.observe(marker);
     return () => observer.disconnect();
   }, [visibleCount, filtered.length, appId]);
-  const count = Object.values(connected).filter(Boolean).length;
   const toggle = async (item: Integration) => {
     setBusy(item.app);
     try {
@@ -71,7 +70,7 @@ function Apps({ nav, appId }: { nav: Nav; appId?: string }) {
   const detail = appId ? CATALOG.find((item) => item.app === appId) : undefined;
   if (detail) return <div className="gx-apps gx-sheet" key={detail.id}>
     <button type="button" className="gx-round" aria-label="Close" onClick={() => nav("/settings/apps")}><X size={22} /></button>
-    <div className="gx-detail"><span className="gx-logo gx-logo-lg"><IntegrationLogo item={detail} size={44} /></span><h2>{detail.name}</h2><p>{detail.description}</p></div>
+    <div className="gx-detail"><span className="gx-logo gx-logo-lg"><IntegrationLogo item={detail} size={64} /></span><h2>{detail.name}</h2><p>{detail.description}</p></div>
     <div className="gx-detail-cta">{button(detail, true)}</div>
     {error && <p className="text-destructive p-4" role="alert">{error}</p>}
     <div className="px-4">{accounts.filter((a) => a.app === integrationSlug(detail.app)).map((account) => <div key={account.id} className="flex items-center gap-3 border-b border-border py-3">
@@ -85,7 +84,7 @@ function Apps({ nav, appId }: { nav: Nav; appId?: string }) {
     {button(item)}
   </div>;
   return <div className="gx-apps">
-    <header className="gx-apps-head"><Button variant="ghost" size="icon" className="gx-round" aria-label="Back" onClick={() => nav("/settings")}><ChevronLeft size={24} /></Button><h1>Connect apps</h1><span className="gx-count">{count} connected</span></header>
+    <header className="gx-apps-head"><Button variant="ghost" size="icon" className="gx-round" aria-label="Back" onClick={() => nav("/settings")}><ChevronLeft size={24} /></Button><h1>Connect apps</h1></header>
     <div className="gx-chips">{cats.map((category) => <Button variant="ghost" key={category} data-active={cat === category || (category === "All" && cat === "Suggested")} onClick={() => chooseCategory(category)}>{category}</Button>)}</div>
     <div className="gx-apps-scroll">
       {error && <p className="text-destructive p-4" role="alert">{error}</p>}

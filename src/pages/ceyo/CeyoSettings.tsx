@@ -183,7 +183,6 @@ function MeCard({ onClick }: { onClick?: () => void }) {
 
 function Main({ nav }: { nav: Nav }) {
   const [haptics, setHaptics] = useState(true);
-  const [notify, setNotify] = useState(false);
   const [theme, setThemeMode] = useState<ThemeMode>("dark");
   const [language, setLanguage] = useState("System");
   const [permissions, setPermissions] = useState<PermissionPreferences>(DEFAULT_PERMISSIONS);
@@ -192,7 +191,6 @@ function Main({ nav }: { nav: Nav }) {
 
   useEffect(() => {
     setHaptics(readSetting("ceyo_haptics") !== "off");
-    setNotify(readSetting("ceyo_notify") === "on");
     setThemeMode(getStoredTheme());
     const savedLanguage = readSetting("ceyo_language") || "system";
     setLanguage(LANGUAGES.find(([code]) => code === savedLanguage)?.[1] || "System");
@@ -206,14 +204,6 @@ function Main({ nav }: { nav: Nav }) {
     if (key === "ceyo_haptics" && value && "vibrate" in navigator) navigator.vibrate(12);
   };
 
-  const toggleNotifications = async () => {
-    if (notify) return flip("ceyo_notify", false, setNotify);
-    if (!("Notification" in window)) return toast.error("Notifications are not supported on this device");
-    const permission = await Notification.requestPermission();
-    if (permission !== "granted") return toast.error("Allow notifications in your browser settings first");
-    flip("ceyo_notify", true, setNotify);
-  };
-
   return (
     <Shell title="Settings" back={() => nav("/")}>
       <Group>
@@ -224,7 +214,6 @@ function Main({ nav }: { nav: Nav }) {
         <Row label="Vault" sub="Saved labels and contact info on this device" onClick={() => nav("/settings/vault")} />
       </Group>
       <Group><Row label="Connect apps" sub="Search plugins" onClick={() => nav("/settings/apps")} /></Group>
-      {hasPhoneAssistant() && <Group><Row label="Phone settings" sub="Voice, Hey Ceyo, driving mode, guards and permissions" onClick={() => nav("/settings/android")} /></Group>}
       <Group title="Agent">
         <Row label="Permissions" sub={permissionSummary(permissions)} onClick={() => nav("/settings/permissions")} />
         <Row label="Time Zone" value={tz} right={<span />} />
@@ -233,7 +222,6 @@ function Main({ nav }: { nav: Nav }) {
         <Row label="Import Memory" onClick={() => nav("/settings/memory")} />
       </Group>
       <Group>
-        <Row label="Notifications" checked={notify} onClick={() => void toggleNotifications()} right={<Toggle on={notify} />} />
         <Row label="Appearance" value={theme === "system" ? "Follow System" : theme === "dark" ? "Dark" : "Light"} onClick={() => nav("/settings/appearance")} />
         <Row label="Language" value={language} onClick={() => nav("/settings/language")} />
         <Row label="Haptics" value={haptics ? "On" : "Off"} onClick={() => flip("ceyo_haptics", !haptics, setHaptics)} />

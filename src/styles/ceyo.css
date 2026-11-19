@@ -139,7 +139,7 @@
 .gx-shapes{gap:6px 10px;max-width:290px;margin:26px 0 22px}
 .gx-shapes button{width:48px;height:48px;border-radius:12px}
 .gx-colors{gap:14px 30px;max-width:300px}
-.gx-colors button{width:24px;height:24px}
+.gx-colors button{width:20px;height:20px}
 .gx-create-cta{height:44px;font-size:15px}
 .gx-next{padding:8px 14px;font-size:14px}
 .gx-pick-list{padding:20px 0 90px}
@@ -159,6 +159,9 @@
 .gx-app-row{gap:12px;padding:9px 0}
 .gx-logo{width:36px;height:36px;border-radius:10px}
 .gx-logo>*{transform:scale(.85)}
+.gx-logo.gx-logo-lg{width:76px;height:76px;border-radius:20px;background:#fff;border:1px solid rgba(255,255,255,.08)}
+.gx-logo.gx-logo-lg>*{transform:none}
+.gx-logo img{object-fit:contain}
 .gx-app-copy strong{font-size:14.5px}
 .gx-app-copy small{font-size:12.5px}
 .gx-pill{padding:7px 12px;font-size:13px}

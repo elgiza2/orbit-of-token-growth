@@ -102,6 +102,13 @@ export default function AgentHubPage({ demo = false }: { demo?: boolean }) {
   const [appsOpen, setAppsOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  useEffect(() => { try { const saved: unknown = JSON.parse(localStorage.getItem("ceyo_hub_collapsed") || "[]"); if (Array.isArray(saved)) setCollapsed(new Set(saved.filter((v): v is string => typeof v === "string"))); } catch { /* optional preference */ } }, []);
+  const toggleCategory = (category: string) => setCollapsed((current) => {
+    const next = new Set(current);
+    if (next.has(category)) next.delete(category); else next.add(category);
+    try { localStorage.setItem("ceyo_hub_collapsed", JSON.stringify([...next])); } catch { /* optional preference */ }
+    return next;
+  });
   const [hiddenOpen, setHiddenOpen] = useState(false);
   const [rowMenu, setRowMenu] = useState<{ kind: "bot" | "group"; id: string; x: number; y: number; move?: boolean } | null>(null);
   const pressTimer = useRef<number | null>(null);
@@ -399,7 +406,8 @@ export default function AgentHubPage({ demo = false }: { demo?: boolean }) {
           if (!bots.length && !groups.length) return null;
           const hasSections = [...categories].some((c) => c !== "Unassigned" && (orderedAgents.some((a) => !a.isDefault && categoryFor("bot", a.id) === c && !local.hidden.includes(itemKey("bot", a.id))) || local.groups.some((g) => categoryFor("group", g.id, g) === c && !local.hidden.includes(itemKey("group", g.id)))));
           const rows = <div className="hub-category-rows hub-flat-rows">{sortPinned(groups, (g) => itemKey("group", g.id)).map((group) => renderGroupRow(group))}{sortPinned(bots, (a) => itemKey("bot", a.id)).map((agent) => renderBotRow(agent))}</div>;
-          return hasSections ? <section className="hub-category"><div className="hub-category-title"><span>Unassigned</span><ChevronDown size={14} /></div>{rows}</section> : rows;
+          const unassignedCollapsed = collapsed.has("Unassigned");
+          return hasSections ? <section className="hub-category" data-collapsed={unassignedCollapsed}><button type="button" className="hub-category-title" onClick={(e) => { e.stopPropagation(); toggleCategory("Unassigned"); }} aria-expanded={!unassignedCollapsed}><span>Unassigned</span><ChevronDown size={14} /></button>{!unassignedCollapsed && rows}</section> : rows;
         })()}
 
         {ws.ready && [...categories].filter((category) => category !== "Unassigned").sort((a, b) => a.localeCompare(b)).map((category) => {
@@ -408,8 +416,8 @@ export default function AgentHubPage({ demo = false }: { demo?: boolean }) {
           if (!bots.length && !groups.length) return null;
           const isCollapsed = collapsed.has(category);
           return (
-            <section className="hub-category" key={category}>
-              <button type="button" className="hub-category-title" onClick={() => setCollapsed((current) => { const next = new Set(current); if (next.has(category)) next.delete(category); else next.add(category); return next; })} aria-expanded={!isCollapsed}><span>{category}</span><ChevronDown size={14} /></button>
+            <section className="hub-category" key={category} data-collapsed={isCollapsed}>
+              <button type="button" className="hub-category-title" onClick={(e) => { e.stopPropagation(); toggleCategory(category); }} aria-expanded={!isCollapsed}><span>{category}</span><ChevronDown size={14} /></button>
               {!isCollapsed && <div className="hub-category-rows">{groups.map((group) => renderGroupRow(group))}{bots.map((agent) => renderBotRow(agent))}</div>}
             </section>
           );

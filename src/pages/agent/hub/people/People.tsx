@@ -1,5 +1,6 @@
 import { userErrorText } from "@/lib/errors";
 /** Person-to-person messaging inside the hub: username setup, chat list, new chat/group forms and the chat view. */
+import { readThread, writeThread } from "@/lib/people/threadCache";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowUp, ChevronLeft, LogOut, UserPlus, Bot, X, AtSign, Check, MoreHorizontal, Trash2, Ban, Reply, Link2 } from "lucide-react";
 import { useSwipeReply } from "@/hooks/useSwipeReply";
@@ -175,7 +176,7 @@ export function PeopleChat({ lang, threadId, agents, onBack }: { lang: HubLang; 
   const swipe = useSwipeReply<PeopleMessage>((m) => { setReplyTo(m); textarea.current?.focus(); });
   const scroller = useRef<HTMLDivElement>(null);
   const latestRef = useRef("");
-  useEffect(() => { const last = messages[messages.length - 1]?.created_at; if (last) latestRef.current = last; }, [messages]);
+  useEffect(() => { const last = messages[messages.length - 1]?.created_at; if (last) { latestRef.current = last; writeThread(threadId, messages); } }, [messages, threadId]);
   const textarea = useRef<HTMLTextAreaElement>(null);
 
   const reloadInfo = () => peopleApi.info(threadId).then((i) => i && setInfo({ members: i.members || [], bots: i.bots || [] })).catch(() => {});
@@ -185,7 +186,9 @@ export function PeopleChat({ lang, threadId, agents, onBack }: { lang: HubLang; 
     void peopleApi.thread(threadId).then((t) => alive && setThread(t)).catch(() => {});
     void reloadInfo();
     latestRef.current = "";
-    void peopleApi.messages(threadId).then((m) => { if (alive) { setMessages(m); latestRef.current = m[m.length - 1]?.created_at || new Date(0).toISOString(); } }).catch((e) => setError(userErrorText(e)));
+    const cached = readThread<PeopleMessage>(threadId);
+    if (cached.length) setMessages(cached);
+    void peopleApi.messages(threadId).then((m) => { if (alive) { setMessages(m); writeThread(threadId, m); latestRef.current = m[m.length - 1]?.created_at || new Date(0).toISOString(); } }).catch((e) => setError(userErrorText(e)));
     void peopleApi.markRead(threadId);
     const merge = (incoming: PeopleMessage[]) => {
       if (!alive || !incoming.length) return;

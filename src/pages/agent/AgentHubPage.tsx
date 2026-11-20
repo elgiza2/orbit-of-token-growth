@@ -153,7 +153,8 @@ export default function AgentHubPage({ demo = false }: { demo?: boolean }) {
       }).catch(() => {});
     };
     refreshGroups();
-    const onFocus = () => { if (document.visibilityState === "visible") refreshGroups(); };
+    let hiddenAt = 0;
+    const onFocus = () => { if (document.visibilityState === "hidden") { hiddenAt = Date.now(); return; } if (hiddenAt && Date.now() - hiddenAt > 120_000) refreshGroups(); hiddenAt = 0; };
     document.addEventListener("visibilitychange", onFocus);
     const timer = 0;
     const onChange = () => { refreshGroups(); void loadWorkspace(true); };

@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 const id = z.string().uuid();
-const browser = z.object({ id, cdpUrl: z.string().startsWith("wss://"), liveUrl: z.string().startsWith("https://") });
+const browser = z.object({ id, cdpUrl: z.string().regex(/^(wss|https):\/\//), liveUrl: z.string().startsWith("https://") });
 const API = "https://api.browser-use.com/api/v4";
 
 export class BrowserUseRejected extends Error {

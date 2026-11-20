@@ -25,9 +25,11 @@ async function keys() {
   if (data && typeof data === "object" && !Array.isArray(data)) {
     const merchantId = typeof data.KASHIER_MERCHANT_ID === "string" ? data.KASHIER_MERCHANT_ID.trim() : "";
     const apiKey = typeof data.KASHIER_PAYMENT_API_KEY === "string" ? data.KASHIER_PAYMENT_API_KEY.trim() : "";
-    if (!merchantId || !apiKey) throw new PaymentsUnavailable("Kashier Vault configuration is incomplete");
-    return { merchantId, apiKey };
+    if (merchantId && apiKey) return { merchantId, apiKey };
   }
+  const envMid = process.env["KASHIER_MERCHANT_ID"]?.trim(), envKey = process.env["KASHIER_PAYMENT_API_KEY"]?.trim();
+  if (envMid && envKey) return { merchantId: envMid, apiKey: envKey };
+  if (data && typeof data === "object" && !Array.isArray(data) && Object.keys(data).length) throw new PaymentsUnavailable("Kashier Vault configuration is incomplete");
   const [merchantId, apiKey] = await Promise.all([getProviderKey("kashier_merchant_id"), getProviderKey("kashier_api_key")]);
   if (!merchantId?.trim() || !apiKey?.trim()) throw new PaymentsUnavailable("Kashier is not configured");
   return { merchantId: merchantId.trim(), apiKey: apiKey.trim() };

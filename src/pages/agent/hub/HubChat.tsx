@@ -366,7 +366,8 @@ export function HubChat({
   useEffect(() => {
     // Refresh once when returning to the tab instead of polling every few seconds.
     if (demo || !sessionId || s.running) return;
-    const onVisible = () => { if (document.visibilityState === "visible") window.dispatchEvent(new Event("ceyo-action-completed")); };
+    let hiddenAt = 0;
+    const onVisible = () => { if (document.visibilityState === "hidden") { hiddenAt = Date.now(); return; } if (hiddenAt && Date.now() - hiddenAt > 120_000) window.dispatchEvent(new Event("ceyo-action-completed")); hiddenAt = 0; };
     document.addEventListener("visibilitychange", onVisible);
     return () => document.removeEventListener("visibilitychange", onVisible);
   }, [demo, sessionId, s.running]);

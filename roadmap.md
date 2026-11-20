@@ -1,7 +1,12 @@
 ## Provider switch — 2026-11-20
-- [ ] Kashier: load the signing pair securely from external Supabase Vault and verify checkout after rotation.
-- [ ] Browser Use Cloud: primary managed browser, Browserbase backup; keep isolated code execution in E2B.
-- [ ] AgentPhone: outbound calls to real numbers at the agent user's request; leave the chat voice button alone.
+- [x] Kashier reads the signing pair from external Supabase Vault before opening or claiming payments.
+- [ ] Kashier live verification: owner must rotate and enter the new pair in Supabase Vault; do not use a live charge for testing without approval.
+- [x] Browser Use Cloud is first for the managed browser, Browserbase standby; code execution stays in E2B.
+- [x] Browser Use accepted a read-only check with the configured key.
+- [ ] Browser Use live verification: confirm a real session and login handoff; the provider charges for sessions.
+- [x] AgentPhone outbound path reserves one call per explicitly requested message and leaves the chat voice button unchanged.
+- [x] Discover the sole AgentPhone agent with an active assigned number and configure its ID.
+- [ ] AgentPhone live verification: needs an approved test destination; account readback alone does not verify dialing.
 
 ## Owner's 24-point list (speed, chats, account, vault) — 2026-11-19
 - [x] Integrations: remove "N connected"; fix app logo in the app detail sheet.

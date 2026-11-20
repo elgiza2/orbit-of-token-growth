@@ -2,13 +2,16 @@ import { getProviderKey, isKeyFailure, markProviderKeyFailed } from "@/lib/keys/
 import { browserAction, publicBrowserUrl, browserSessionLifetime, canRetryBrowserRead } from "./browserRules";
 import type { Computer } from "./e2b.server";
 import { exportArtifact } from "./artifacts.server";
+import { browserUse, browserUseCanFallback } from "./browserUse.server";
 
 const API = "https://api.browserbase.com/v1";
+type Session = { id: string; connectUrl: string; key: string; liveUrl: () => Promise<string>; stop: () => Promise<unknown> };
 export function createBotBrowser(userId: string, botId: string, computer: Computer) {
-  let session: { id: string; connectUrl: string; key: string; projectId: string } | null = null;
+  let session: Session | null = null;
   const token = crypto.randomUUID();
   let claimed = false;
   let handoff = false;
+  let uncertain = false;
   async function api(key: string, path: string, body?: object) {
     const res = await fetch(`${API}${path}`, { method: body ? "POST" : "GET", headers: { "X-BB-API-Key": key, "Content-Type": "application/json" }, ...(body ? { body: JSON.stringify(body) } : {}) });
     if (!res.ok) {
@@ -19,14 +22,35 @@ export function createBotBrowser(userId: string, botId: string, computer: Comput
   }
   async function open() {
     if (session) return session;
-    const key = await getProviderKey("browserbase");
-    if (!key) throw new Error("Browser is not configured");
     const { supabaseAdmin: db } = await import("@/integrations/supabase/client.server");
     const { data, error } = await db.rpc("claim_agent_browser", { p_user: userId, p_bot: botId, p_token: token });
     if (error) throw new Error(error.message);
     const row = data?.[0];
     if (!row) throw new Error("This bot's browser is busy or awaiting your login; try again after it finishes");
     claimed = true;
+    const setup = await computer.run("%pip -q install playwright", "python", 120000);
+    if (!setup.ok) throw new Error("Could not prepare browser controls");
+    const primaryKey = process.env.BROWSER_USE_API_KEY?.trim();
+    if (primaryKey) {
+      const provider = browserUse(primaryKey);
+      try {
+        const profileId = row.browser_use_profile_id || await provider.createProfile();
+        if (!row.browser_use_profile_id) {
+          const saved = await db.from("agent_browser_contexts").update({ browser_use_profile_id: profileId }).eq("bot_id", botId).eq("user_id", userId).eq("lease_token", token).select("id").maybeSingle();
+          if (saved.error || !saved.data) throw new Error("Browser profile could not be saved");
+        }
+        const created = await provider.open(profileId);
+        session = { id: created.id, key: primaryKey, connectUrl: created.cdpUrl, liveUrl: async () => created.liveUrl, stop: () => provider.stop(created.id) };
+        return session;
+      } catch (error) {
+        if (!browserUseCanFallback(error)) {
+          uncertain = true;
+          throw new Error("Browser Use could not confirm a session; try again later");
+        }
+      }
+    }
+    const key = await getProviderKey("browserbase");
+    if (!key) throw new Error("Browser is not configured");
     let projectId = row.project_id || process.env.BROWSERBASE_PROJECT_ID;
     if (!projectId) {
       const projects = await api(key, "/projects");
@@ -42,9 +66,11 @@ export function createBotBrowser(userId: string, botId: string, computer: Comput
     const base = { projectId, browserSettings: { context: { id: contextId, persist: true }, viewport: { width: 1280, height: 800 }, blockAds: true }, ...browserSessionLifetime };
     const created = await api(key, "/sessions", { ...base, proxies: true }).catch(() => api(key, "/sessions", base));
     if (!created.id || !created.connectUrl) throw new Error("Browser session unavailable");
-    session = { id: created.id, connectUrl: created.connectUrl, key, projectId };
-    const setup = await computer.run("%pip -q install playwright", "python", 120000);
-    if (!setup.ok) throw new Error("Could not prepare browser controls");
+    session = {
+      id: created.id, connectUrl: created.connectUrl, key,
+      liveUrl: async () => (await api(key, `/sessions/${created.id}/debug`)).debuggerFullscreenUrl,
+      stop: () => api(key, `/sessions/${created.id}`, { status: "REQUEST_RELEASE", projectId }),
+    };
     return session;
   }
   return {
@@ -77,15 +103,18 @@ export function createBotBrowser(userId: string, botId: string, computer: Comput
         return JSON.stringify({ ...card, instruction: "Screenshot is shown to the user. If it is a login QR, tell them to scan it from their phone app (WhatsApp: Linked devices; Telegram: Settings > Devices) within a minute, then reply 'done'. Then STOP and wait; afterwards use look to confirm sign-in." });
       }
       if (input.action === "login") {
-        const debug = await api(current.key, `/sessions/${current.id}/debug`);
+        const liveUrl = await current.liveUrl();
+        if (typeof liveUrl !== "string" || !liveUrl.startsWith("https://")) throw new Error("Browser sign-in view unavailable");
         handoff = true;
-        return JSON.stringify({ type: "ceyo.widget", widget: "browser_handoff", handoff: "ceyo.browser_login", data: { url: debug.debuggerFullscreenUrl, site: input.url, reason: input.question }, url: debug.debuggerFullscreenUrl, instruction: "A live browser card with an I'm done button is shown to this user. They sign in or solve the check themselves. Stop and wait; never ask for their password or bypass verification. Context is saved when session ends (up to 10 minutes)." });
+        return JSON.stringify({ type: "ceyo.widget", widget: "browser_handoff", handoff: "ceyo.browser_login", data: { url: liveUrl, site: input.url, reason: input.question }, url: liveUrl, instruction: "A live browser card with an I'm done button is shown to this user. They sign in or solve the check themselves. Stop and wait; never ask for their password or bypass verification. Context is saved when session ends (up to 10 minutes)." });
       }
       return result.output;
     },
     async close() {
-      if (handoff) return; // provider timeout persists context; lease expires safely
-      if (session) await api(session.key, `/sessions/${session.id}`, { status: "REQUEST_RELEASE", projectId: session.projectId }).catch(() => undefined);
+      if (handoff || uncertain) return; // provider timeout persists context; lease expires safely
+      if (session) {
+        try { await session.stop(); } catch { return; } // Keep the lease until timeout if stop is not confirmed.
+      }
       if (claimed) {
         const { supabaseAdmin: db } = await import("@/integrations/supabase/client.server");
         await db.from("agent_browser_contexts").update({ lease_until: null, lease_token: null }).eq("bot_id", botId).eq("user_id", userId).eq("lease_token", token);

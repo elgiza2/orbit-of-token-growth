@@ -108,6 +108,7 @@ export type Database = {
       agent_browser_contexts: {
         Row: {
           bot_id: string
+          browser_use_profile_id: string | null
           context_id: string | null
           created_at: string
           id: string
@@ -119,6 +120,7 @@ export type Database = {
         }
         Insert: {
           bot_id: string
+          browser_use_profile_id?: string | null
           context_id?: string | null
           created_at?: string
           id?: string
@@ -130,6 +132,7 @@ export type Database = {
         }
         Update: {
           bot_id?: string
+          browser_use_profile_id?: string | null
           context_id?: string | null
           created_at?: string
           id?: string
@@ -1231,6 +1234,7 @@ export type Database = {
       phone_calls: {
         Row: {
           agent_number: string | null
+          agentphone_call_id: string | null
           bot_id: string | null
           call_control_id: string | null
           conversation_id: string | null
@@ -1251,6 +1255,7 @@ export type Database = {
         }
         Insert: {
           agent_number?: string | null
+          agentphone_call_id?: string | null
           bot_id?: string | null
           call_control_id?: string | null
           conversation_id?: string | null
@@ -1271,6 +1276,7 @@ export type Database = {
         }
         Update: {
           agent_number?: string | null
+          agentphone_call_id?: string | null
           bot_id?: string | null
           call_control_id?: string | null
           conversation_id?: string | null
@@ -2135,6 +2141,7 @@ export type Database = {
         Args: { p_bot: string; p_token: string; p_user: string }
         Returns: {
           bot_id: string
+          browser_use_profile_id: string | null
           context_id: string | null
           created_at: string
           id: string
@@ -2299,6 +2306,17 @@ export type Database = {
       record_trial_tokens: {
         Args: { p_tokens: number; p_user: string }
         Returns: undefined
+      }
+      reserve_agentphone_call: {
+        Args: {
+          p_bot: string
+          p_call: string
+          p_conversation: string
+          p_goal: string
+          p_to: string
+          p_user: string
+        }
+        Returns: string
       }
       reserve_free_video_call_minute: { Args: never; Returns: Json }
       save_bot_group: {

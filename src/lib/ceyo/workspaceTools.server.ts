@@ -60,27 +60,28 @@ export function workspaceTools(ctx: Context): AgentTool[] {
     const row = checked(result);
     return JSON.stringify({ type: "ceyo.call", ...row });
   });
-  add("phone_call", `Place a REAL phone call over the phone network (not the in-app call_user ring). You talk to the other person by voice; the transcript summary is posted in this chat automatically when the call ends, so never claim a result before that. Use only when the LATEST user message explicitly asks you to call/phone someone. to: "me" for the user's own saved mobile, otherwise the number in international form (+countrycode...) that the user gave or that appears in this chat. goal: exactly what to achieve and every detail you may share (names, date, time, party size). One call per request; never redial on your own.`, { to: { type: "string", description: "\"me\" or a number like +201012345678" }, goal: str }, ["to", "goal"], async (args) => {
-    const { normalizeE164, numberMentioned, requestsPhoneCall, phoneCallId } = await import("@/lib/phone/phoneRules");
+  add("phone_call", `Place one real phone call now, not an in-app ring. Use only when the latest user message explicitly requests it. The same message must include the exact international number or ask to call the user's own saved mobile (to: "me"). goal: only the purpose and details the user authorized you to share; never include credentials, private memory or unrelated chat. Never redial or claim a result before the call report.`, { to: { type: "string", description: "\"me\" or an international phone number" }, goal: str }, ["to", "goal"], async (args) => {
+    const { asksToCallMe, normalizeE164, requestsPhoneCall, phoneCallId } = await import("@/lib/phone/phoneRules");
     const input = z.object({ to: z.string().trim().min(2).max(40), goal: z.string().trim().min(3).max(2000) }).parse(args);
     const latest = checked(await db.from("messages").select("id,content").eq("conversation_id", ctx.conversationId).eq("user_id", userId).eq("role", "user").order("created_at", { ascending: false }).limit(1).maybeSingle());
     if (!latest || !requestsPhoneCall(latest.content || "")) throw new Error("The latest user message does not ask for a phone call. Do not call.");
     const callingOwner = /^(me|myself|user|أنا|انا)$/i.test(input.to);
     let to: string | null;
     if (callingOwner) {
+      if (!asksToCallMe(latest.content)) throw new Error("Ask the user to confirm that they want a call on their own number.");
       const profile = checked(await db.from("profiles").select("phone_e164").eq("id", userId).maybeSingle());
-      to = profile?.phone_e164 || null;
+      to = normalizeE164(profile?.phone_e164);
       if (!to) throw new Error("The user has no saved mobile number. Ask them to add it in Settings → Phone calls, then try again.");
     } else {
       to = normalizeE164(input.to);
       if (!to) throw new Error("Invalid number. Use international format with country code, e.g. +201012345678.");
-      const recent = checked(await db.from("messages").select("content").eq("conversation_id", ctx.conversationId).eq("user_id", userId).order("created_at", { ascending: false }).limit(30)) as Array<{ content: string | null }>;
-      if (!numberMentioned(latest.content || "", to) && !recent.some((m) => numberMentioned(m.content || "", to!))) throw new Error("That number does not appear in this chat. Ask the user to confirm the exact number first.");
+      const supplied = (latest.content as string).match(/(?:\+|00)[1-9](?:[ ()\-.]*\d){7,14}(?!\d)/g) ?? [];
+      if (!supplied.some((number) => normalizeE164(number) === to)) throw new Error("Ask the user to include the exact number in international format in their latest request.");
     }
-    const { dialOut } = await import("@/lib/phone/telnyx.server");
-    const id = await phoneCallId(ctx.conversationId, latest.id, to);
-    const placed = await dialOut({ userId, botId: ctx.botId, conversationId: ctx.conversationId, to, goal: input.goal, callingOwner, languageHint: latest.content || "", callId: id });
-    return JSON.stringify({ type: "ceyo.phone_call", id, to, from: placed.from, status: "dialing", already_requested: Boolean(placed.alreadyRequested), instruction: "Tell the user briefly that you are calling now and will post the result here when the call ends. Do not call again and do not invent the outcome." });
+    const { dialAgentPhone } = await import("@/lib/phone/telnyx.server");
+    const id = await phoneCallId(ctx.conversationId, latest.id);
+    const placed = await dialAgentPhone({ userId, botId: ctx.botId, conversationId: ctx.conversationId, to, goal: input.goal, callingOwner, languageHint: latest.content, callId: id });
+    return JSON.stringify({ type: "ceyo.phone_call", id, to, from: placed.from, status: placed.status, already_requested: placed.alreadyRequested, instruction: placed.alreadyRequested ? "This request already exists; do not dial again or claim it is ringing." : "The provider accepted the call; do not claim it was answered or invent the outcome." });
   });
   add("save_file", "Save a real text, code, CSV or JSON deliverable in the user's library.", { name: str, mime: str, content: str }, ["name", "mime", "content"], async (args) => {
     const file = checked(await db.from("agent_documents").insert({ ...documentInput.parse(args), user_id: userId, bot_id: ctx.botId }).select("id,name").single());

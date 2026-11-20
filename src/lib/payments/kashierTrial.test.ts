@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const rpc = vi.hoisted(() => vi.fn(async () => ({ data: true, error: null })));
+const rpc = vi.hoisted(() => vi.fn(async (name: string, _args?: unknown): Promise<{ data: unknown; error: unknown }> => ({
+  data: name === "read_kashier_credentials" ? null : true, error: null,
+})));
 const order = vi.hoisted(() => ({ current: null as Record<string, unknown> | null }));
 vi.mock("@/integrations/supabase/client.server", () => ({
   supabaseAdmin: {
@@ -10,18 +12,33 @@ vi.mock("@/integrations/supabase/client.server", () => ({
 }));
 vi.mock("@/lib/keys/providerKey", () => ({ getProviderKey: async (p: string) => (p === "kashier_api_key" ? "secret-key" : "MID-1") }));
 
-import { handleKashierWebhook, savedCardFrom } from "./kashier.server";
+import { chargeDueCards, handleKashierWebhook, savedCardFrom } from "./kashier.server";
 import { kashierCardPayload } from "./kashierCard";
 
-async function sign(data: Record<string, unknown>) {
+async function sign(data: Record<string, unknown>, signingKey = "secret-key") {
   const keys = (data.signatureKeys as string[]).slice().sort();
   const msg = keys.map((k) => `${k}=${String(data[k] ?? "")}`).join("&");
-  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode("secret-key"), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(signingKey), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
   return Array.from(new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(msg)))).map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 describe("Card-first web trial", () => {
   beforeEach(() => rpc.mockClear());
+
+  it("checks webhook signatures with the complete Vault pair ahead of the legacy key", async () => {
+    order.current = null;
+    const data = { merchantOrderId: "ceyo_vault_1", signatureKeys: ["merchantOrderId"] };
+    const vault = { data: { KASHIER_MERCHANT_ID: "MID-FIXTURE", KASHIER_PAYMENT_API_KEY: "vault-fixture-key" }, error: null };
+    rpc.mockResolvedValueOnce(vault).mockResolvedValueOnce(vault);
+    await expect(handleKashierWebhook(JSON.stringify({ data }), await sign(data))).resolves.toEqual({ ok: false, status: 401 });
+    await expect(handleKashierWebhook(JSON.stringify({ data }), await sign(data, "vault-fixture-key"))).resolves.toEqual({ ok: true, status: 200 });
+  });
+
+  it("does not claim any renewals when the Vault pair is incomplete", async () => {
+    rpc.mockResolvedValueOnce({ data: { KASHIER_MERCHANT_ID: "MID-FIXTURE" }, error: null });
+    await expect(chargeDueCards("https://example.com")).rejects.toThrow("configuration is incomplete");
+    expect(rpc.mock.calls.map(([name]) => name)).toEqual(["read_kashier_credentials"]);
+  });
 
   it("a paid $1 card check starts the trial with the saved card and never grants a plan", async () => {
     order.current = { id: "ceyo_trial_1", amount: 1, currency: "EGP", status: "pending", method: "trial_card" };

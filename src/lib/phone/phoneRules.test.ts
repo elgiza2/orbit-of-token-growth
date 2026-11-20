@@ -31,8 +31,8 @@ describe("phone call rules", () => {
   });
 
   it("gives the same call id to retries of the same request", async () => {
-    const a = await phoneCallId("c", "m", "+12352047886");
-    expect(await phoneCallId("c", "m", "+12352047886")).toBe(a);
-    expect(await phoneCallId("c", "m2", "+12352047886")).not.toBe(a);
+    const a = await phoneCallId("c", "m");
+    expect(await phoneCallId("c", "m")).toBe(a);
+    expect(await phoneCallId("c", "m2")).not.toBe(a);
   });
 });

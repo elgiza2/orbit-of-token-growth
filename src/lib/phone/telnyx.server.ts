@@ -3,6 +3,7 @@
 import { createHash } from "crypto";
 import { supabaseAdmin } from "@/integrations/supabase/client.server";
 import { getProviderKey } from "@/lib/keys/providerKey";
+import { agentPhone } from "./agentphone.server";
 import {
   PHONE_CALL_MAX_SECONDS, PHONE_DAILY_CALL_LIMIT, PHONE_RING_TIMEOUT_SECONDS, finalStatus, isArabic,
   phoneGreeting, phoneInstructions, phoneVoice, transcriptTurns, type Turn,
@@ -189,6 +190,44 @@ export async function releaseNumber(userId: string, botId: string) {
 
 type DialInput = { userId: string; botId: string | null; conversationId: string; to: string; goal: string; callingOwner: boolean; languageHint: string; callId: string };
 
+/** AgentPhone is only for agent-requested outbound telephony, never the in-app call button. */
+export async function dialAgentPhone(input: DialInput) {
+  const key = process.env.AGENTPHONE_API_KEY?.trim();
+  const agentId = process.env.AGENTPHONE_AGENT_ID?.trim();
+  if (!key || !agentId) throw new PhoneUnavailable("Outgoing phone calls are not configured");
+  const { data: profile } = input.botId ? { data: null } : await db().from("profiles").select("primary_bot_id").eq("id", input.userId).maybeSingle();
+  const botId = input.botId ?? profile?.primary_bot_id;
+  if (!botId) throw new Error("No agent is available to make this call");
+  const bot = await loadBot(botId, input.userId);
+  const owner = await ownerName(input.userId);
+  const reservation = await supabaseAdmin.rpc("reserve_agentphone_call", {
+    p_user: input.userId, p_bot: bot.id, p_conversation: input.conversationId, p_call: input.callId, p_to: input.to, p_goal: input.goal,
+  });
+  if (reservation.error) throw new Error("Could not reserve the phone call");
+  if (reservation.data === "existing") {
+    const { data } = await supabaseAdmin.from("phone_calls").select("status,agent_number,agentphone_call_id").eq("id", input.callId).eq("user_id", input.userId).maybeSingle();
+    return { alreadyRequested: true, from: data?.agent_number, status: data?.agentphone_call_id?.startsWith("pending:") ? "unconfirmed" : data?.status ?? "unconfirmed" };
+  }
+  if (reservation.data === "limit") throw new Error(`Daily limit of ${PHONE_DAILY_CALL_LIMIT} phone calls reached`);
+  if (reservation.data === "busy") throw new Error("Another phone call is still in progress or awaiting confirmation");
+  if (reservation.data !== "reserved") throw new Error("Could not authorize this phone call");
+  const persona = { botName: bot.name, ownerName: owner, direction: "outbound" as const, callingOwner: input.callingOwner };
+  try {
+    const placed = await agentPhone(key).dial({
+      agentId, toNumber: input.to,
+      initialGreeting: phoneGreeting({ ...persona, arabic: isArabic(input.languageHint) }),
+      systemPrompt: phoneInstructions({ ...persona, goal: input.goal, counterpart: input.to }),
+    });
+    const saved = await supabaseAdmin.from("phone_calls").update({ agentphone_call_id: placed.id, agent_number: placed.fromNumber ?? null })
+      .eq("id", input.callId).eq("user_id", input.userId).eq("agentphone_call_id", `pending:${input.callId}`).select("id").maybeSingle();
+    if (saved.error || !saved.data) throw new Error("Call could not be saved");
+    return { alreadyRequested: false, from: placed.fromNumber, status: "dialing" };
+  } catch {
+    // The provider may already be dialing. Never try a different provider or redial.
+    throw new PhoneUnavailable("The call outcome could not be confirmed. Do not place it again until you check what happened.");
+  }
+}
+
 /** Place one outbound AI call. The phone_calls row is reserved first so retries cannot dial twice. */
 export async function dialOut(input: DialInput) {
   const since = new Date(Date.now() - 86_400_000).toISOString();
@@ -276,6 +315,7 @@ async function summarize(row: CallRow, turns: Turn[], botName: string) {
   const status = row.status as string;
   if (!turns.some((t) => t.role === "user")) {
     if (status === "failed") return arabic ? `ما قدرتش أكمّل المكالمة مع ${row.counterpart}. ${row.error ? `السبب: ${row.error}` : ""}`.trim() : `I couldn't complete the call to ${row.counterpart}.${row.error ? ` Reason: ${row.error}` : ""}`;
+    if (status === "completed") return arabic ? `المكالمة مع ${row.counterpart} انتهت، بس مافيش نص يؤكد اللي حصل.` : `The call to ${row.counterpart} ended, but no transcript confirms the outcome.`;
     return arabic ? `اتصلت بـ ${row.counterpart} ومحدش رد.` : `I called ${row.counterpart} but nobody answered.`;
   }
   try {
@@ -314,8 +354,33 @@ async function deliver(row: CallRow, turns: Turn[]) {
   return conversationId;
 }
 
+async function syncAgentPhone(row: CallRow): Promise<string | null> {
+  const id = String(row.agentphone_call_id);
+  let update: { status: string; ended_at: string; error?: string; duration_sec?: number | null };
+  let turns: Turn[] = [];
+  if (id.startsWith("pending:")) {
+    if (Date.now() - Date.parse(row.created_at) < 20 * 60_000) return null;
+    update = { status: "failed", error: "The phone provider did not confirm the outcome.", ended_at: new Date().toISOString() };
+  } else {
+    const key = process.env.AGENTPHONE_API_KEY?.trim();
+    if (!key) return null;
+    const call = await agentPhone(key).read(id, row.counterpart);
+    const noAnswer = ["no-answer", "no_answer", "busy"].includes(call.status);
+    if (!noAnswer && !["completed", "failed", "canceled", "cancelled"].includes(call.status)) {
+      if (call.status === "in-progress" && row.status === "dialing") await db().from("phone_calls").update({ status: "in_progress" }).eq("id", row.id).eq("status", "dialing");
+      return null;
+    }
+    turns = call.turns;
+    update = { status: noAnswer ? "no_answer" : call.status === "completed" ? "completed" : "failed", ended_at: call.endedAt || new Date().toISOString(), duration_sec: call.durationSeconds ?? null };
+  }
+  const { data: closed, error } = await db().from("phone_calls").update({ ...update, transcript: turns }).eq("id", row.id).eq("agentphone_call_id", id).in("status", ["dialing", "in_progress"]).select("*").maybeSingle();
+  if (error) throw new Error("Could not save the call result");
+  return closed ? deliver(closed, turns) : null;
+}
+
 /** Re-read one outbound call from Telnyx and finish it when the line is closed. */
 export async function syncOutbound(row: CallRow): Promise<string | null> {
+  if (row.agentphone_call_id) return syncAgentPhone(row);
   if (!row.call_control_id) {
     if (Date.now() - Date.parse(row.created_at) < 2 * 60_000) return null;
     await db().from("phone_calls").update({ status: "failed", error: "The call did not start", ended_at: new Date().toISOString() }).eq("id", row.id).in("status", ["dialing", "in_progress"]);

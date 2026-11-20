@@ -2293,6 +2293,7 @@ export type Database = {
       platform_user_entitlement: { Args: { p_user_id: string }; Returns: Json }
       read_agentsky_api_key: { Args: never; Returns: string }
       read_channel_credential: { Args: { p_name: string }; Returns: string }
+      read_kashier_credentials: { Args: never; Returns: Json }
       read_runtime_credential: { Args: { p_name: string }; Returns: string }
       read_telegram_bot_token: { Args: never; Returns: string }
       record_trial_tokens: {

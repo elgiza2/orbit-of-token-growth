@@ -1,3 +1,8 @@
+## Provider switch — 2026-11-20
+- [ ] Kashier: load the signing pair securely from external Supabase Vault and verify checkout after rotation.
+- [ ] Browser Use Cloud: primary managed browser, Browserbase backup; keep isolated code execution in E2B.
+- [ ] AgentPhone: outbound calls to real numbers at the agent user's request; leave the chat voice button alone.
+
 ## Owner's 24-point list (speed, chats, account, vault) — 2026-11-19
 - [x] Integrations: remove "N connected"; fix app logo in the app detail sheet.
 - [x] Settings: remove Phone settings row and Notifications switch (always on, asked automatically on web; Android uses the app's own permission).

@@ -20,8 +20,16 @@ function safeEqual(a: string, b: string) {
 }
 
 async function keys() {
+  const { data, error } = await supabaseAdmin.rpc("read_kashier_credentials");
+  if (error) throw new PaymentsUnavailable("Kashier credential storage is unavailable");
+  if (data && typeof data === "object" && !Array.isArray(data)) {
+    const merchantId = typeof data.KASHIER_MERCHANT_ID === "string" ? data.KASHIER_MERCHANT_ID.trim() : "";
+    const apiKey = typeof data.KASHIER_PAYMENT_API_KEY === "string" ? data.KASHIER_PAYMENT_API_KEY.trim() : "";
+    if (!merchantId || !apiKey) throw new PaymentsUnavailable("Kashier Vault configuration is incomplete");
+    return { merchantId, apiKey };
+  }
   const [merchantId, apiKey] = await Promise.all([getProviderKey("kashier_merchant_id"), getProviderKey("kashier_api_key")]);
-  if (!merchantId || !apiKey) throw new PaymentsUnavailable("Kashier is not configured");
+  if (!merchantId?.trim() || !apiKey?.trim()) throw new PaymentsUnavailable("Kashier is not configured");
   return { merchantId: merchantId.trim(), apiKey: apiKey.trim() };
 }
 
@@ -170,11 +178,11 @@ export async function handleKashierWebhook(raw: string, signature: string) {
 
 /** Charge saved cards whose trial or period has ended (called by the private scheduler). */
 export async function chargeDueCards(origin: string) {
+  const { merchantId, apiKey } = await keys();
   const { data: due, error } = await db().rpc("claim_due_card_charges");
   if (error) throw new Error(error.message);
   const rows = (due ?? []) as { user_id: string; tier: string; interval: string; card_token: string | null; card_agreement_id: string | null }[];
   if (!rows.length) return [];
-  const { merchantId, apiKey } = await keys();
   const results: { user: string; ok: boolean }[] = [];
   for (const row of rows) {
     const usd = priceOf(row.tier, row.interval);
